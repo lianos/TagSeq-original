@@ -1,0 +1,249 @@
+#!/usr/bin/env Rscript
+
+what <- paste(
+  "A preprocessing script that will convert the original FASTQ file into a",
+  "cleaned one, with:\n",
+  "  * Adapters trimmed from the right end",
+  "  * The DpnII 5' C-artifact removed",
+  "  * Bad reads (no restriction site, or too short) removed",
+  sep="\n")
+
+err <- function(..., sep=" ") {
+  msg <- paste(unlist(list(...)), sep=sep)
+  cat("ERROR:", msg, "\n")
+  quit(save='no', status=1)
+}
+
+suppressPackageStartupMessages({
+  if (!require(optparse)) {
+    err('optparse library needed, please install via:\n',
+        'install.packages("optparse", repos="http://R-Forge.R-project.org")')
+  }
+})
+
+usage <- paste("usage: %prog [options] FILE.fastq [OUT.fastq]\n\n",
+               "       If OUT.fastq is missing, it will be inferred to be\n",
+               "       FILE.trimmed.fastq\n\n", what, sep="")
+
+option.list <-
+  list(
+       make_option(c('-a', '--adapter'), default='TCGTATGCCGTCTTCTGCTTG',
+                   help='The adapter sequence to trim off of the right end'),
+       make_option(c('-m', '--match.score'), default=1, type="double",
+                   help=paste('Score added for matching characters in a',
+                              'pairwise alignment')),
+       make_option(c('-M', '--mismatch.score'), default=-1, type="double",
+                   help='Score to add when characters do not match in alignment'),
+       make_option(c('-s', '--score.threshold'), default=2, type="double",
+                   help="Sensitivity of matching against adapter"),
+       make_option(c('-g', '--gap.penalty'), default=-5, type="double",
+                   help="The gap penalty"),
+       make_option(c('-e', '--gap.extension.penalty'), default=-2, type='double',
+                   help="The gap extension penalty"),
+       make_option(c('-d', '--dir'), default='.', type='character',
+                   help='The directory to store results in'),
+       make_option(c('-q', '--quality'), default='illumina',
+                   help=paste("The type of quality scores to use. Options are:",
+                              "illumina, phred, auto")),
+       make_option(c('-l', '--acceptable.length'), default="20,21,22",
+                   help=paste("The expected length of the 'good' reads. Reads",
+                              "that do not match this length will be removed"))
+  )
+
+## Generates a default option list for interactive use.
+.opts <- function() {
+  list(adapter="TCGTATGCCGTCTTCTGCTTG", match.score=1,
+       mismatch.score=-1, score.threshold=2, gap.penalty=-5,
+       gap.extension.penalty=-2, dir='.', quality='illumina',
+       acceptable.length="20,21,22")
+}
+
+## Steps
+## 1. Remove sequences that don't start with the appropriate enzyme cut, eg:
+##    CATG or CGATC
+##
+## 2. Remove sequences with adapter in bad position
+##
+## 3. Write ShortReadQ object to FASTQ File
+
+parser <- OptionParser(usage=usage, option_list=option.list)
+parsed <- parse_args(parser, positional_argument=TRUE)
+opts <- parsed$options
+args <- parsed$args
+
+################################################################################
+## Process positional arguments
+
+if (length(args) < 1 || length(args) > 2) {
+  err("Only 1 or 2 arguments accepted")
+}
+
+fastq.infile <- args[1]
+if (!file.exists(fastq.infile)) {
+  err("FASTQ File can not be loaded:", fastq.infile)
+}
+
+if (length(args) < 2) {
+  fastq.outfile <- basename(fastq.infile)
+  x <- strsplit(fastq.outfile, '.', fixed=TRUE)[[1]]
+  extension <- x[length(x)]
+  fastq.outfile <- gsub(extension, sprintf("trimmed.%s", extension),
+                        fastq.outfile)
+} else {
+  fastq.outfile <- args[2]
+}
+
+if (file.exists(file.path(opts$dir,fastq.outfile))) {
+  err("Target FASTQ file", fastq.outfile, "already exists")
+}
+
+cat("Will save trimmed FASTQ file to", file.path(opts$dir, fastq.outfile), "\n")
+
+################################################################################
+## Process Optional Arguments
+
+if (!file.info(opts$dir)$isdir) {
+  err("Output directory `", opts$dir, "` does not exist", sep="")
+}
+
+if (opts$mismatch.score > 0) {
+  opts$mismatch.score <- opts$mismatch.score * -1L
+}
+
+acceptable.length <- as.integer(strsplit(opts$acceptable.length, ",")[[1]])
+
+.qualities <- c(SFastqQuality='illumina', FastqQuality='phred', Auto='auto')
+fastq.quality <- pmatch(opts$quality, .qualities)
+if (!is.na(fastq.quality)) {
+  fastq.quality <- names(.qualities[fastq.quality])
+} else {
+  err("Unknown quality type")
+}
+
+################################################################################
+## Get down to business
+##
+## If you're running this interactively (not via a script), load the ShortRead
+## object into a `fastq` variable and get the default opts list by calling:
+## opts <- .opts()
+
+cat("Loading TagSeq ...\n")
+## suppressPackageStartupMessages({
+##   library(TagSeq)
+## })
+dl('gfx', 'seq', 'tag')
+
+start.time <- proc.time()['elapsed']
+
+cat("Loading FASTQ file into memory ...\n")
+fastq <- readFastq(dirname(fastq.infile), basename(fastq.infile),
+                   qualityType=fastq.quality)
+
+read.count <- length(fastq)
+
+read.length <- unique(width(fastq))
+cat("... read length(s): ", paste(read.length, collapse=",", sep=""), "\n")
+read.length <- min(read.length)
+
+
+cat("Trimming adapters at 3' end of reads ...\n")
+st <- system.time({
+  fastq <- trimAdapter(fastq, opts$adapter, opts$match.score,
+                       opts$mismatch.score, opts$score.threshold,
+                       gap.penalty=opts$gap.penalty,
+                       gap.extension.penalty=opts$gap.extension.penalty,
+                       verbose=TRUE)
+})
+cat("... [", st['elapsed'], " seconds]\n\n")
+
+## Plot read length distribution after adapter is stripped
+png(file.path(opts$dir, "read.length.distribution.pre.dpn2.png"),
+    height=800, width=1000)
+plotDiscreteDistribution(table(width(fastq)))
+d.id <- dev.off()
+
+
+cat("Trimming (C)-artifact from DpnII cut ...\n")
+st <- system.time({
+  fastq <- trimDgeDpn2Artifact(fastq, verbose=TRUE)
+})
+cat("... [", st['elapsed'], " seconds]\n\n")
+
+## Plot read length distribution after adapter is stripped and DpnII
+## artifact is nuked
+png(file.path(opts$dir, "read.length.distribution.post.dpn2.png"),
+    height=800, width=1000)
+plotDiscreteDistribution(table(width(fastq)))
+d.id <- dev.off()
+
+## Plot restriction site distribution
+cat("Plotting restriction site distribution ...\n")
+rs.distro <- leadingKmerDistribution(fastq)
+png(file.path(opts$dir, "restriction.site.distro.png"),
+    width=800, height=800)
+plotKmerDistribution(rs.distro)
+d.id <- dev.off()
+
+cat("Removing reads with unrecognized restriction sites at 5' end ...\n")
+st <- system.time({
+  reads <- narrow(sread(fastq), start=1, width=4)
+
+  m.dpn2 <- vmatchPattern("GATC", reads)
+  found.dpn2 <- countIndex(m.dpn2) == 1L
+
+  m.nla3 <- vmatchPattern('CATG', reads)
+  found.nla3 <- countIndex(m.nla3) == 1L
+  keep <- found.dpn2 | found.nla3
+  n.keep <- sum(keep)
+  
+  cat("Keeping", n.keep, "reads",
+      sprintf("(%.4f%%)\n", n.keep / length(keep)))
+  
+  fastq <- fastq[found.dpn2 | found.nla3]
+})
+cat("... [", st['elapsed'], " seconds]\n\n")
+
+
+## Strip reads that aren't of acceptable length
+cat("Removing reads of unacceptable lengths ...\n")
+st <- system.time({
+  keep <- width(fastq) %in% acceptable.length
+  n.keep <- sum(keep)
+  
+  cat("Keeping", n.keep, "reads",
+      sprintf("(%.4f%%)\n", n.keep / length(keep)))
+
+  fastq <- fastq[keep]
+})
+cat("... [", st['elapsed'], " seconds]\n\n")
+
+
+## Plot GC Content
+cat("Plotting GC Content Distribution ...\n")
+gc <- qa.gc.content(sread(fastq), binned=FALSE)
+png(file.path(opts$dir, "gc.content.pre-align.png"), height=800, width=800)
+plotGcContent(gc)
+dev.off()
+
+## Finally, report and write cleaned FASTQ file
+n.dropped <- read.count - length(fastq)
+cat("Total number of reads dropped:", n.dropped,
+    sprintf("(%.2f%%)\n\n", (n.dropped / read.count) * 100))
+
+################################################################################
+## Read processing is done. Write cleaned reads to a new file
+if (length(fastq) == 0) {
+  cat("============== NO READS LEFT ================\n")
+} else {
+  cat("Writing", prettyNum(length(fastq), big.mark=","),
+      "reads to new FASTQ file on disk ...\n")
+  ## save(fastq, file=file.path(opts$dir, paste(fastq.outfile, 'rda', sep=".")))
+  st <- system.time({
+    writeFastq(fastq, file.path(opts$dir, fastq.outfile))
+  })
+  cat("... [", st['elapsed'], " seconds]\n\n")
+}
+
+
+time.taken <- proc.time()['elapsed'] - start.time
+cat("====== Total time taken:", time.taken, "seconds ======\n\n")

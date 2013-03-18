@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+
+# This script relies on the fastx-toolkit to:
+#  (i)   trim low quality 3' ends
+#  (ii)  clip the adapter
+#
+# The last step is to use my 'seqtools' ngs-trim-homopolymer script to trim off
+# any A* homopolymer stretches remaining at the end of the reads.
+
+usage() {
+  NAME=$(basename $0)
+  cat <<EOF
+${NAME} [OPTIONS] FASTQ_FILE OUT_FILE
+
+Runs a "canned" pipeline over the data to:
+    ## (0) Remove low complexity reads
+    ##    ngs-filter-complexity -c 0.5 ... FASTQ_FILE
+    (i) Trim off low quality 3' ends (adjust quality score with the -t flag)
+   (ii) Clip off any 3' adapter remaining (specify adapter with -a flag)
+  (iii) Remove any 3' homopolymer stretch at the end.
+
+Reads taht fall below a minimum width (defaults to 21) are trashed. To save
+these reads, use the -T flag.
+
+Final output is gzipped if OUT_FILE ends in *.gz
+
+  Inputs:
+    FASTQ_FILE : The path to the fastq file to process
+
+  Options:
+    -h        This help screen
+    -H        Which homopolymer to trim [A]
+    -m        Minimum length of read to keep
+    -t        The threshold to use for quality score clipping [30]
+    -a        The adapter sequence [TCGTATGCCGTCTTCTGCTTG]
+    -z        Specifies that output should be gzipped.
+    -l        Name of log file [processing-log.txt]
+    -T  FILE  The name of file to save reads that "fail."
+EOF
+}
+
+QTHRESHOLD=30
+TRASHFILE="polyA.trash.fastq"
+ADAPTER="TCGTATGCCGTCTTCTGCTTG"
+GZIP=""
+LOGFILE="processing-log.txt"
+MINLENGTH=21
+HOMOPOLYMER="A"
+KEEP_TEMP=1
+
+while getopts 'hzm:t:a:l:T:H:' OPTION
+do
+  case $OPTION in
+    a)
+      ADAPTER=$OPTARG
+      ;;
+    H)
+      HOMOPOLYMER=$OPTARG
+      ;;
+    l)
+      LOGFILE=$OPTARG
+      ;;
+    m)
+      MINLENGTH=$OPTARG
+      ;;
+    T)
+      TRASHFILE=$OPTARG
+      ;;
+    t)
+      QTHRESHOLD=$OPTARG
+      ;;
+    z)
+      GZIP="-z"
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    ?)
+      echo "Unknown option: ${OPTION}"
+      exit 1
+      ;;
+  esac
+done
+
+## Jump to the next/first non-option argument, and process positional arguments
+shift $(($OPTIND - 1))
+
+if [ $# -lt 2 ]; then
+  echo "ERROR: Illegal number of parameters. Need input and output"
+  exit 1
+fi
+
+SEQFILE=$1
+OUTFILE=$2
+
+if [ ! -f $SEQFILE ]; then
+  echo "Input file cannot be found: ${SEQFILE}"
+  exit 1
+fi
+
+if [ -f $OUTFILE ]; then
+  echo "Output file already exists -- pick something else"
+  exit 1
+fi
+
+if [ -f $LOGFILE ]; then
+  echo "Logfile already exists -- pick a different one with -l"
+  exit 1
+fi
+
+EXT=`echo ${SEQFILE} | awk -F . '{print $NF}'`
+ISGZIP=0
+if [ "${EXT}" == "gz" ]; then
+  echo "Input is a gzip file"
+  ISGZIP=1
+fi
+
+echo "Getting down to business"
+
+if [ $ISGZIP -eq 1 ]; then
+  QFILTER_CMD="gunzip -c ${SEQFILE} | fastq_quality_trimmer -Q33"
+else
+  QFILTER_CMD="fastq_quality_trimmer -Q33 -i ${SEQFILE}"
+fi
+
+if [ $KEEP_TEMP -eq 1 ]; then
+  echo "Trimming low quality ends" | tee -a ${LOGFILE}
+  CMD="${QFILTER_CMD} -v -t ${QTHRESHOLD} -l ${MINLENGTH} -o ${SEQFILE}.quality-trim >> ${LOGFILE}"
+  echo "$CMD" | tee -a ${LOGFILE}
+  eval $CMD
+  echo "" | tee -a ${LOGFILE}
+
+  echo "Clipping adapter" | tee -a ${LOGFILE}
+  CMD="fastx_clipper -Q33 -v -a ${ADAPTER} -l ${MINLENGTH} -i ${SEQFILE}.quality-trim -o ${SEQFILE}.adapter-clip >> ${LOGFILE}"
+  echo "${CMD}" | tee -a ${LOGFILE}
+  eval $CMD
+  echo "" | tee -a ${LOGFILE}
+
+  echo "Clipping homo-polymer tail" | tee -a ${LOGFILE}
+  CMD="fastxx_homopolymer_trimmer ${GZIP} -v -l ${MINLENGTH} -t ${TRASHFILE} -i ${SEQFILE}.adapter-clip -o ${OUTFILE} >> ${LOGFILE}"
+  echo $CMD | tee -a ${LOGFILE}
+  eval $CMD
+else
+  CMD="${QFILTER_CMD} -v -t ${QTHRESHOLD} -l ${MINLENGTH} 2>> ${LOGFILE}"
+  CMD="${CMD} | fastx_clipper -v -a ${ADAPTER} -l ${MINLENGTH} 2>> ${LOGFILE}"
+# CMD="${CMD} | ngs-trim-homopolymer -t ${TRASHFILE} -b ${HOMOPOLYMER} -m ${MINLENGTH} -o ${OUTFILE} - >> ${LOGFILE}"
+  CMD="${CMD} | fastxx_homopolymer_trimmer ${GZIP} -v -l ${MINLENGTH} -t ${TRASHFILE} -o ${OUTFILE}"
+  echo "${CMD}" | tee -a ${LOGFILE}
+  eval $CMD
+fi
+

@@ -1,0 +1,29 @@
+import(methods)
+import(BiocGenerics)
+import(GenomicRanges)
+import(SeqTools)
+import(SeqStore)
+import(foreach)
+import(data.table)
+
+exportClasses(TailSeq, TagSeq, SAGEseq)
+
+exportMethods(
+              annotateReads,
+              countTagsByRegion,
+              TPM, iTPM,
+
+              tagSummaryByGene,
+              tagTable)
+
+export(internalPrimingSummary,
+       flagInternallyPrimedEventsByBoundedQuantiles,
+       flagInternalInternallyPrimedEventsByBoundedQuantiles,
+
+       createCountMatrix,
+
+       aggregateTxBounds,
+       inferTxBounds,
+
+       annotateSummarizedExperiment
+       )

@@ -1,0 +1,224 @@
+#!/usr/bin/env Rscript
+
+details <- "
+  Calculates the distribution of the genomic regions the reads from a
+  BAM file align to.
+
+  BAM1 [BAM2 [...]] are the paths to individual BAM files to analyze.
+  The output (barplot *.png) is written to ${BAM1/.bam/.png}
+
+  Packages Required:
+    + optparse
+    + SeqTools
+    + multicore (for > 1 thread)"
+
+## Use `optparse` to configure and parse command line arguments.
+suppressPackageStartupMessages({
+  if (!require(optparse)) {
+    err('The optparse library needed, please install via:\n',
+        'install.packages("optparse", repos="http://R-Forge.R-project.org")')
+  }
+})
+
+################################################################################
+## Generic Rscript setup
+## -----------------------------------------------------------------------------
+
+## Insures that Rscript will exit during an uncaught error
+options(error=function(err) {
+  banner <- paste(rep("=", 80), collapse="")
+  cat("", banner, "An error happened you didn't account for.",
+      "Exiting ...", banner, "", sep="\n")
+  quit(save='no', status=1)
+})
+
+## Exit script with user supplied error
+err <- function(..., sep=" ") {
+  msg <- paste(unlist(list(...)), sep=sep)
+  cat("ERROR:", msg, "\n")
+  quit(save='no', status=1)
+}
+
+dir.exists <- function(path) {
+  path <- as.character(path)
+  sapply(file.info(path)$isdir, isTRUE)
+}
+
+################################################################################
+## Particulars of this script start here
+## -----------------------------------------------------------------------------
+usage <- paste("%prog [OPTIONS] BAM1 [BAM2 [...]]", details, sep="\n")
+option.list <-
+  list(make_option(c('-o', '--outdir'), default='.', type='character',
+                   help='The directory to output the results to'),
+       make_option(c('-G', '--genome'), default='hg19', type='character',
+                   help="The assembly of the annotated genome object to use"),
+       make_option(c('-u', '--unique'), default=FALSE, type='logical',
+                   action='store_true',
+                   help="Only load uniquely aligned reads"),
+       make_option(c('-m', '--max-mismatch'), default=Inf, type='numeric',
+                   dest='max.mismatch',
+                   help="Maximum number of mismatches to allow in processed reads"),
+       make_option(c('-a', '--assign'), default='fix',
+                   help=paste("Assign reads by quantifying overlaps, or by",
+                              "picking one overlap [fix/quantify]")),
+       make_option(c('-t', '--threads'), default=2, type='integer',
+                   help="Number of threads to use (requires multicore)"),
+       make_option(c('-d', '--annodir'), type='character', default=NULL,
+                   help=paste("Path to the directory that hodls the ",
+                              "annotated.genome.*.rds files. By default ",
+                              "the script looks for this value in ",
+                              "the TAGSEQ_ANNODIR environment variable.")),
+       make_option(c('-n', '--no.strand'), default=FALSE, action="store_true",
+                   help="Set to ignore the strand of alignments."),
+       make_option(c('-r', '--reverse-complement'), default=FALSE,
+                   dest='reverse.complement', action="store_true",
+                   help="Reads should be considered to oppossite strand of alignment."),
+       make_option(c('-v', '--verbose'), default=FALSE, action="store_true",
+                   help="Keeps you informed of what's happening.")
+       )
+
+parser <- OptionParser(usage=usage, option_list=option.list)
+parsed <- parse_args(parser, positional_arguments=TRUE)
+opts <- parsed$options
+args <- parsed$args
+
+verbose <- opts$verbose
+if (opts$no.strand) {
+  err("Ignoring strand is not implemented yet -- left as exercise for reader.")
+}
+
+###############################################################################
+## Check options
+## ----------------------------------------------------------------------------
+annodir <- opts$annodir
+genome <- opts$genome
+assign.by <- match.arg(opts$assign, c('quantify', 'fix'))
+opposite.strand <- opts$reverse.complement
+threads <- as.integer(opts$threads)
+unique.only <- opts$unique
+max.mismatch <- opts$max.mismatch
+if (!is.finite(max.mismatch)) {
+  max.mismatch <- NULL
+}
+outdir <- opts$outdir
+if (!isTRUE(file.info(outdir)$isdir)) {
+  err("Invalid directory for outdir:", outdir)
+}
+
+options(cores=threads)
+
+## ----------------------------------------------------------------------------
+## If opts$genome isn't a path to a file, then we need to make sure the annodir
+## stuff is setup properly.
+if (!file.exists(genome)) {
+  if (is.null(annodir)) {
+    annodir <- Sys.getenv("TAGSEQ_ANNODIR")
+  }
+  if (!dir.exists(annodir)) {
+    err("TAGSEQ_ANNODIR not found and `-d` is not set")
+  }
+  genome <- file.path(annodir, sprintf('annotated.genome.%s.rds', genome))
+  if (!file.exists(genome)) {
+    err("Can't load genome annotation file: ", genome)
+  }
+}
+
+## ----------------------------------------------------------------------------
+## Check input files
+if (length(args) < 1) {
+  err("A bam file is required")
+}
+
+is.file <- file.exists(args) & !dir.exists(args)
+if (sum(is.file) < length(is.file)) {
+  cat("Can't read these files -- skipping", args[!is.file], sep="\n")
+}
+input <- args[is.file]
+if (length(input) == 0) {
+  err("No BAM files were found")
+}
+
+if (verbose) {
+  cat("Loading genome annotation object ...\n")
+}
+anno <- readRDS(genome)
+if (!inherits(anno, 'GenomicRanges')) {
+  err("Genome Annotation object looks wrong, GenomicRanges subclass required")
+}
+
+###############################################################################
+## Everything looks kosher, let's do the deed.
+## ----------------------------------------------------------------------------
+if (verbose) {
+  cat("Loading required packages ...\n")
+}
+suppressPackageStartupMessages({
+  library(multicore)
+  library(SeqTools)
+  suppressWarnings(use.ggplot <- require(ggplot2))
+  dl('gc', 'seqstore', 'tagseq')
+})
+
+if (verbose) {
+  cat("Loading", if (unique.only) 'unique' else 'multimap',
+      "reads using", opts$threads, "thread(s) ...\n")
+}
+
+if (verbose) {
+  cat("Processing", length(input), "files ...\n")
+}
+for (bam.file in input) {
+  if (verbose) {
+    cat("Processing", bam.file, "\n")
+  }
+
+  distro <- mclapply(seqlevels(bam.file), function(chr) {
+    if (verbose) {
+      cat("...", chr, "\n")
+    }
+    reads <- getReadsFromSequence(BamFile(bam.file), chr,
+                                  unique.only=unique.only,
+                                  max.mismatch=max.mismatch,
+                                  opposite.strand=opposite.strand)
+    if (length(reads)) {
+      suppressWarnings(ar <- annotateReads(reads, anno, assign.by=assign.by))
+      ans <- table(values(ar)$exon.anno)
+    } else {
+      ans <- NULL
+    }
+    ans
+  }, mc.preschedule=FALSE)
+  distro <- distro[!sapply(distro, is.null)]
+
+  anno.names <- unique(unlist(sapply(distro, names)))
+  counts <- rep(0L, length(anno.names))
+  names(counts) <- anno.names
+
+  for (d in distro) {
+    for (wut in names(d)) {
+      counts[wut] <- counts[wut] + d[wut]
+    }
+  }
+
+  df <- data.frame(annotation=names(counts), count=unname(counts))
+  show(df)
+
+  pic <- gsub('bam', 'png', basename(bam.file))
+  pic <- file.path(outdir, pic)
+
+  png(pic)
+
+  if (use.ggplot) {
+    g <- ggplot(df, aes(annotation, count)) + theme_bw() +
+      geom_bar(aes(fill=annotation), stat='identity') +
+        ylab("Count") + xlab("Exon Annotation") +
+          opts(axis.text.x=theme_text(angle=-45, hjust=0, vjust=1),
+               title="Read alignment distribution")
+    print(g)
+  } else {
+    barplot(counts, las=2, main=basename(bam.file))
+  }
+
+  dev.off()
+}

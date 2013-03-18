@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+
+import sys, os, time, re
+from optparse import OptionParser
+
+## The hela passeq always has screwed up cigars, so look for alignments with
+## X0:i:N (>1) and ghetto-fix the CIGAR (turn it into *)
+
+
+## 11M1D24M   ATTTTTTAAAACCAGAACATTTATGCATGACTAATCGTTG
+
+csplit = re.compile('[MIDNSHP=X]')
+
+def cigar_correct_fancy(cigar, sequence):
+    ## Tried to verify the cigar string against the length of the sequence by
+    ## counting the I's and D's -- not exactly working.
+    splits = csplit.split(cigar)
+    ciglen = sum([int(x) for x in splits[0:len(splits)-1]])
+    return ciglen == len(sequence)
+
+def cigar_correct(cigar, sequence):
+    return ('D' not in cigar) and ('I' not in cigar)
+
+if __name__ == '__main__':
+    usage = "%prog: IN.sam OUT.sam"
+    parser = OptionParser(usage=usage)
+    (options,args) = parser.parse_args()
+
+    infile = open(args[0], 'r')
+    outfile = open(args[1], 'w')
+    n_nuked = 0
+    t = time.time()
+    for idx,line in enumerate(infile):
+        if line.startswith("@") or "X0:i:1" in line:
+            outfile.write(line)
+            continue
+        info = line.split("\t")
+        cigar = info[5]
+        sequence = info[9]
+        if not cigar_correct(cigar, sequence):
+            info[5] = '*'
+            n_nuked += 1
+        line = '\t'.join(info)
+        outfile.write(line)
+    sys.stdout.write("Removed " + str(n_nuked) + " cigars\n")
+    sys.stdout.write("Took " + str(time.time() - t) + " seconds\n")
+

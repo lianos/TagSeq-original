@@ -1,0 +1,11 @@
+Package: TagSeq
+Version: 0.0.1
+License: GPL-2
+Title: Analyze data generated from high throughput tag-sequencing protocols.
+Description: Tools to analyze in-house tag sequencing protocols from Mayr and Tuschl.
+Depends: SeqStore, GenomicFeatures, GenomicCache
+Imports: methods, BiocGenerics, Biostrings, ShortRead, foreach, doMC, data.table, SeqTools
+Suggests: testthat (>= 0.4)
+Author: Steve Lianoglou <slianoglou@gmail.com>
+Maintainer: Steve Lianoglou <slianoglou@gmail.com>
+LazyLoad: yes

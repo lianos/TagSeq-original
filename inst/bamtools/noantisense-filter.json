@@ -1,0 +1,13 @@
+{
+  "filters" : [
+    {
+      "id"  : "antisense",
+      "tag" : "ZZ:antisense"
+    },
+    {
+      "id" : "ismapped",
+      "isMapped" : "true"
+    }
+  ],
+  "rule" : "!antisense & ismapped"
+}

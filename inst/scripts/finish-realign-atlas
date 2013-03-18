@@ -1,0 +1,86 @@
+#!/usr/bin/env python
+
+import sys, os, time, re
+from optparse import OptionParser
+from subprocess import check_call, CalledProcessError
+from glob import glob
+
+## Create the data directories
+## move the bam file over
+## generate
+## run `bamtools stats` to get the read coun
+
+def process(bamfile, dataset_name, options):
+    outdir = os.path.join(options.path, 'datasets', dataset_name)
+    os.makedirs(os.path.join(outdir, 'bams'))
+    os.makedirs(os.path.join(outdir, 'meta'))
+    fh = open(os.path.join(outdir, 'metadata.yaml'), 'w')
+
+    fh.write("genome: %s\n" % options.genome)
+    fh.write("aligner: %s\n" % options.aligner)
+    fh.write("is.pared: FALSE\n")
+    fh.write("max.mismatch: 0.04\n")
+    fh.write("max.alignments: 5\n")
+    fh.write("post.processed: TRUE\n")
+    fh.write("sequence.flipped: FALSE\n")
+
+    ## Count reads in bam file
+    baminfo = open(os.path.join(outdir, 'bamstats.txt'), 'w')
+    try:
+        check_call(['bamtools', 'stats', '-in', bamfile], stdout=baminfo)
+    except CalledProcessError,e:
+        print "Problem getting stats for bam file, readcount set to 00"
+        baminfo.write("Mapped reads: 00\n")
+    baminfo.close()
+
+    ## read file and look for readcount
+    bh = open(baminfo.name, 'r')
+    baminfo = bh.readlines()
+    bh.close()
+
+    info = ''.join(baminfo).replace("\n", " ")
+    m = re.findall(r"""Mapped reads:.+?(\d+)""", info)
+    if len(m) == 1:
+        readcount = m[0]
+    else:
+        readcount = '00'
+
+    fh.write("read.count: %s\n" % readcount)
+    fh.write("read.count.unique: %s\n" % readcount)
+    fh.close()
+
+    os.rename(bamfile, os.path.join(outdir, 'bams', os.path.basename(bamfile)))
+    bai = "%s.bai" % bamfile
+    os.rename(bai, os.path.join(outdir, 'bams', os.path.basename(bai)))
+
+
+if __name__ == '__main__':
+    usage = """usage: %prog DATASET_NAME
+
+    + Creates a new datasets/DATASET_NAME directory with expected
+      package structure.
+    + The bam files are moved to the right place.
+    + Generates a ghetto metadata.yaml file.
+    + Adds read.count info by running bamtools stats -in *
+    """
+
+    parser = OptionParser(usage=usage)
+    parser.add_option('-g', '--genome', dest='genome', default='hg19')
+    parser.add_option('-p', '--path', dest='path', default='.')
+    parser.add_option('-a', '--aligner', dest='aligner', default='bwa')
+    parser.add_option('-b', '--bam_pattern', default="*realign*.bam")
+    options,args = parser.parse_args()
+
+    if len(args) != 1:
+        parser.error("Need name of dataset to make")
+    bamfile = glob(os.path.join(options.path, options.bam_pattern))
+    if len(bamfile) != 1:
+        parser.error("bamfile not found")
+    bamfile = bamfile[0]
+
+    print "Processing bamfile", bamfile
+
+    if not os.path.isfile(bamfile):
+        parser.error("bamfile not found [%s]" % bamfile)
+
+    process(bamfile, args[0], options)

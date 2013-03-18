@@ -1,0 +1,138 @@
+#!/usr/bin/env python
+
+import sys, os, time
+from optparse import OptionParser
+from contextlib import closing
+
+from seqtools import solid, fastq
+from seqtools.io import xopen
+
+
+# Process the DGE data.
+# This duplicates functionality in clean-dge-fastq, but uses lots less
+# memory
+#
+# This funciontality requires that the "cutadapt" library is installed:
+#   http://code.google.com/p/cutadapt/
+
+def trim_dpnii(read, *args, **kwargs):
+    if read.sequence.startswith('CGATC'):
+        try:
+            read = read.trim(1, 'left')
+        except ValueError:
+            read = None
+    return read
+
+## Make sure you trim the dpnii adapter first
+def filter_anchor(read, anchors, *args, **kwargs):
+    is_good = [read.sequence.startswith(x) for x in anchors]
+    if any(is_good):
+        return read
+    return None
+
+def process(infile, outfile, funcs, trashfile=None, parser='fastq',
+            minlength=0, *args, **kwargs):
+    if parser == 'fastq':
+        parser = fastq.parse
+    else:
+        raise NotImplementedError("Only doing FASTQ for now")
+
+    count, good, bad = 0, 0, 0
+    for read in parser(infile):
+        count += 1
+        is_good = True
+        for func in funcs:
+            pread = func(read, *args, **kwargs)
+            if pread is None or (minlength > 0 and len(pread) < minlength):
+                if trashfile is not None:
+                    trashfile.write("@%s\n%s\n+\n%s\n" % \
+                                    (read.id, read.sequence, read.quality))
+                is_good = False
+                bad +=1
+                break
+        if is_good:
+            good += 1
+            outfile.write("@%s\n%s\n+\n%s\n" % \
+                          (pread.id, pread.sequence, pread.quality))
+    return (count, good, bad)
+
+if __name__ == '__main__':
+    usage = """usage: %prog [options] [CMD] INPUT.fastq[.gz]
+
+    Runs the given CMD step in the cleaning of DGE data. If CMD is missing
+    then the entire pipeline is run. All files can be read and output in
+    gzip format -- the names of the files just have to end in *.gz
+
+    NOTE: You will have to remove the sequencing adapter either before
+    or after running the steps in this script. You can use the python
+    cutadapt library, or the fastx-toolkit (faster) for that.
+
+    The commands CMD to be run are as follows (in order):
+        dpnii          : Trims the 5' C of the CGATC reads
+
+        filter-anchor  : Only keeps reads with successful 5' restriction sites
+                         By default the anchors are defined as GATC and CATG,
+                         so we assume that dpnii was run before. If you want to
+                         run this first, use --anchors=CATG,CGATC
+
+    """
+
+    parser = OptionParser(usage=usage)
+    parser.add_option('-a', '--adapter', dest='adapter',
+                      default="TCGTATGCCGTCTTCTGCTTG",
+                      help="The sequence of the 3' adapter.")
+    parser.add_option('-r', '--anchors', dest='anchors',
+                      default="GATC,CATG",
+                      help="Comma separated list of expected anchor sites at 5' end")
+    parser.add_option('-o', '--outfile', dest='outfile', default=None,
+                      help="Name of file to dump output, defaults to STDOUT")
+    parser.add_option('-t', '--trashfile', dest='trashfile', default=None,
+                      help="Optional name of file to put 'bad' reads into")
+    parser.add_option('-m', '--minimum-length', dest='minlength', type=int,
+                      default=0, help="Reads < this length are discarded.")
+    (options, args) = parser.parse_args()
+
+
+    steps = {'dpnii' : trim_dpnii, 'filter' : filter_anchor}
+
+    if len(args) < 1:
+        parser.error("Need at least one argument for input filename")
+
+    if args[0] in steps:
+        pfuncs = (steps[args[0]],)
+        infile = args[1]
+    else:
+        pfuncs = (steps['dpnii'], steps['filter'])
+        infile = args[0]
+
+    if not os.path.isfile(infile):
+        parser.error("Cannot read input file.")
+
+    if options.outfile is None:
+        outfile = sys.stdout
+    else:
+        outfile = xopen(options.outfile, 'w')
+
+    if options.trashfile is None:
+        trashfile = None
+    else:
+        trashfile = xopen(options.trashfile, 'w')
+
+    anchors = options.anchors.split(',')
+
+    elapsed = time.time()
+    (total, good, bad) = process(infile, outfile, pfuncs, trashfile,
+                                 anchors=anchors, minlength=options.minlength)
+    elapsed = time.time() - elapsed
+
+    if options.outfile is not None:
+        outfile.close()
+    if options.trashfile is not None:
+        trashfile.close()
+
+    sys.stderr.write('=== DGE Processing Done (%.2f seconds) ===\n' % elapsed)
+    sys.stderr.write('   Processed %d sequences.\n' % total)
+    sys.stderr.write('   Kept %d\n' % good)
+    sys.stderr.write('   Tossed %d\n' %bad)
+
+

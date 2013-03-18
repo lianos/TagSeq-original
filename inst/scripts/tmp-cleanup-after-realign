@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+echo "fix this before you run it"
+exit 1
+
+mv -v datasets/hump-rescue-1 datasets/hump-rescue-not-flipped
+mkdir -p datasets/hump-rescue-1/bams
+mkdir -p datasets/hump-rescue-1/meta/annotated.signal
+mkdir -p datasets/hump-rescue-1/meta/smooth.signal
+
+mv -v smooth-signal.chr* datasets/hump-rescue-1/meta/smooth.signal/
+mv -v realign-signal-chr* datasets/hump-rescue-1/meta/annotated.signal/
+mv -v *bam* datasets/hump-rescue-1/bams/
+
+cp datasets/hump-rescue-not-flipped/metadata.yaml datasets/hump-rescue-1/
+
+bamtools stats -in datasets/hump-rescue-1/bams/realign-final.bam
+vi datasets/hump-rescue-1/metadata.yaml
+
+rm *.sam
+rm realign-from-chr*

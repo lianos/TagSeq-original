@@ -1,0 +1,26 @@
+div.qc-section {
+  border-top: 1px solid black;
+}
+
+#topGenes td {
+  text-align: center;
+}
+
+#topGenes table {
+  margin-top: 20px;
+  border: 1px solid black;
+}
+
+#topGenes td img {
+  width: 600px;
+}
+
+#topGenes table tr.gene-name td {
+  padding: 50px;
+  font-weight: bold;
+}
+
+#topGenes tr {
+  border-bottom: 1px solid black;
+  padding-bottom: 15px;
+}

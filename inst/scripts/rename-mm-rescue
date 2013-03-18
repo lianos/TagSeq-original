@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+## This script is run after realigning BAM files using
+## the apa-atlas/...::postProcessAgainstLawn function.
+## 
+## It assumes that the realigned file is the only bam/bai combo
+## that resides in the root of the experiment's SeqStore directory.
+
+
+## Step 1: Rename the *.bam files.
+## 
+## They are all saved as `realign-clea.bam`
+## under their respective SeqStore directories.
+for f in $(ls *.hg19/*.bam); do
+  dname=`dirname $f`;
+  fbase=${dname/.SeqStore.hg19/};
+  cmd="mv ${f} ${dname}/${fbase}-mm-rescue.bam";
+  echo $cmd;
+  eval $cmd;
+done
+
+## Step 2: Rename the *.bai files
+for f in $(ls *.hg19/*.bai); do
+  dname=`dirname $f`;
+  fbase=${dname/.SeqStore.hg19/};
+  cmd="mv ${f} ${dname}/${fbase}-mm-rescue.bam.bai";
+  echo $cmd; eval $cmd;
+done
+

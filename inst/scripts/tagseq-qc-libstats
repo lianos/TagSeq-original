@@ -1,0 +1,154 @@
+#!/usr/bin/env Rscript
+
+details <- "
+  Calculates the quality of the library by looking at how many reads are lost
+  at each step of during the pre-processing stes up through alignment of the
+  final reads.
+
+  PROCESSING_LOG is the path to the log written by `multiplex-preprocess`
+  METADATA is the path to the metadata.yaml file written by bwa2bam
+
+  Package Required:
+    + optparse
+    + yaml"
+
+################################################################################
+## Generic Rscript setup
+## -----------------------------------------------------------------------------
+
+## Insures that Rscript will exit during an uncaught error
+options(error=function(err) {
+  banner <- paste(rep("=", 80), collapse="")
+  cat("", banner, "An error happened you didn't account for.",
+      "Exiting ...", banner, "", sep="\n")
+  quit(save='no', status=1)
+})
+
+## Exit script with user supplied error
+err <- function(..., sep=" ") {
+  msg <- paste(unlist(list(...)), sep=sep)
+  cat("ERROR:", msg, "\n")
+  quit(save='no', status=1)
+}
+
+## Use `optparse` to configure and parse command line arguments.
+suppressPackageStartupMessages({
+  if (!require(optparse)) {
+    err('The optparse library needed, please install via:\n',
+        'install.packages("optparse", repos="http://R-Forge.R-project.org")')
+  }
+  library(yaml)
+})
+
+################################################################################
+## Particulars of this script start here
+## -----------------------------------------------------------------------------
+usage <- paste("%prog [OPTIONS] PROCESSING_LOG METADATA\n", details, sep="\n")
+
+option.list <-
+  list(make_option(c('-p', '--prefix'), default='proc', action='store',
+                   help="Prefix used for the output files (use expt name)"),
+       make_option(c('-o', '--outdir'), default='.', action="store",
+                   help="The directory to save the output"),
+       make_option(c('-v', '--verbose'), default=FALSE, action="store_true",
+                   help="Keeps you informed of what's happening.")
+       )
+
+parser <- OptionParser(usage=usage, option_list=option.list)
+parsed <- parse_args(parser, positional_arguments=TRUE)
+opts <- parsed$options
+args <- parsed$args
+
+verbose <- opts$verbose
+outdir <- opts$outdir
+prefix <- opts$prefix
+
+###############################################################################
+## Check option/arguments
+## ----------------------------------------------------------------------------
+if (length(args) < 1) {
+  err("Path to processing-log.txt is minimally requred")
+}
+plog <- args[1]
+if (!file.exists(plog)) {
+  err("Can't read processing log:", plog)
+}
+
+align.stats <- FALSE
+if (length(args) > 1) {
+  meta <- args[2]
+  if (!file.exists(meta)) {
+    err("Can't read metadata.yaml file:", meta)
+  }
+  align.stats <- TRUE
+}
+
+## does output directory exist?
+if (!is.logical(file.info(outdir)$isdir) && file.info(outdir)$isdir) {
+  err("Output directory can not be read:", outdir)
+}
+
+###############################################################################
+## Everything looks kosher, let's do the deed.
+## ----------------------------------------------------------------------------
+
+preproc <- readLines(file.path(plog))
+
+## Number of reads from (1) input and (2) adapter trimming
+pre.in <- sapply(preproc[grep('input', preproc, ignore.case=TRUE)],
+                 function(line) {
+                   as.integer(strsplit(line, ' ')[[1]][[2]])
+                 })
+names(pre.in) <- c('quality', 'adapter')
+homo.A.in <- preproc[grep('Reads processed', preproc,
+                          ignore.case=TRUE)]
+homo.A.in <- as.integer(tail(strsplit(homo.A.in, ' ')[[1]], 1))
+homo.A.trash <- preproc[grep('trashed', preproc, ignore.case=TRUE)]
+homo.A.trash <- as.integer(tail(strsplit(homo.A.trash, ' ')[[1]], 1))
+reads.2.align <- homo.A.in - homo.A.trash
+
+steps <- c('start', 'quality', 'adapter', 'AAAAA')
+counts <- c(pre.in['quality'],  pre.in['adapter'], homo.A.in, reads.2.align)
+
+if (align.stats) {
+  meta <- readLines(file.path(meta))
+  n.aligned <- meta[grep('read.count:', meta, ignore.case=TRUE)]
+  n.aligned <- as.integer(tail(strsplit(n.aligned, ' ')[[1]], 1))
+  n.unique <- meta[grep('count.unique:', meta, ignore.case=TRUE)]
+  n.unique <- as.integer(tail(strsplit(n.unique, ' ')[[1]], 1))
+
+  steps <- c(steps, 'aligned', 'unique')
+  counts <- c(counts, n.aligned, n.unique)
+}
+
+names(counts) <- steps
+
+p.lost <- c(0, 1 - (counts[-1] / head(counts, -1)))
+names(p.lost) <- steps
+
+if (align.stats) {
+  p.lost['aligned'] <- 1 - (n.aligned / reads.2.align)
+}
+
+df <- data.frame(step=steps, count=counts, p.lost=p.lost)
+rownames(df) <- NULL
+
+if (verbose) {
+  show(df)
+}
+
+stat.file <- paste(opts$prefix, 'libstats.txt', sep='-')
+write.table(df, file=file.path(outdir, stat.file), sep="\t", row.names=FALSE,
+            quote=FALSE)
+
+gfx.file <- paste(opts$prefix, 'libstats.png', sep='-')
+title <- paste(opts$prefix, 'libstats')
+title <- paste(title, sprintf("%d reads in", counts['start']),
+               sprintf("%d reads out", counts['after.A']),
+               sprintf("%d unique aligned", counts['unique']),
+               sep="\n")
+png(file.path(outdir, gfx.file))
+barplot(p.lost, las=1, main=title, ylim=c(0,1),
+        ylab="Fraction of reads lost from previous step",
+        xlab="Read processing step")
+dev.off()
