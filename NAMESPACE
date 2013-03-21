@@ -2,11 +2,11 @@ import(methods)
 import(BiocGenerics)
 import(GenomicRanges)
 import(SeqTools)
-import(SeqStore)
 import(foreach)
 import(data.table)
+import(biosignals)
 
-exportClasses(TailSeq, TagSeq, SAGEseq)
+exportClasses(TagSeqExperiment, SAGEseqExperiment)
 
 exportMethods(
               annotateReads,
@@ -25,5 +25,8 @@ export(internalPrimingSummary,
        aggregateTxBounds,
        inferTxBounds,
 
-       annotateSummarizedExperiment
+       annotateSummarizedExperiment,
+
+       summarizeTagClustersFromExperiments,
+       identifyPeaksOnChromosome
        )

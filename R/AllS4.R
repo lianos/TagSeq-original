@@ -1,15 +1,8 @@
-##' @exportClass TagSeq
-setClass("TagSeq", contains="RnaSeqStore",
-         prototype=prototype(is.paired=FALSE,
-                             is.stranded=TRUE))
+##' @exportClass TagSeqExperiment
+setClass("TagSeqExperiment", contains="SummarizedExperiment")
 
-##' @exportClass TailSeq
-setClass("TailSeq", contains="TagSeq")
-
-##' @exportClass SAGEseq
-setClass("SAGEseq", contains="TagSeq",
-         representation(restriction.site='character'),
-         prototype(restriction.site=character()))
+##' @exportClass SAGEseqExperiment
+setClass("SAGEseqExperiment", contains="TagSeqExperiment")
 
 ##' @exportClass CompressedReads
 setClass("CompressedReads", contains="GRanges")
