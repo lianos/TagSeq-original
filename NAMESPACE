@@ -32,5 +32,8 @@ export(internalPrimingSummary,
        quantifyPeakExpression,
 
        # ApA specific,
-       collectPolyAPositionStatistics
+       collectPolyAPositionStatistics,
+       combinePrimingInfo,
+       identifyValidPaSignals,
+       kPolyA
        )

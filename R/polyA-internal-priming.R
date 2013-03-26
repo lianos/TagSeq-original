@@ -1,55 +1,18 @@
-## Sliding window maybe should be 5/6 A's
-## TODO: Internal priming stuff still not perfect, see region
-##       From all-new data set:
-##         chr10:123,238,863-123,238,921
-##
-##       Why is this peak from ccnd1 removed?
-##         chr11:69,466,156-69,466,304 (it has AAGAAA)
-##
-## older data:
-##
-##       chr1:183,595,430-183,595,894 in atlas used on July 21, 2011
-##       also: chr14:77,743,304-77,743,387b
-##             chr8:87,484,845-87,485,016
-##       in new a222 (2011-08-25)
-##       chr1  77555388  77555431
-##
-## TODO: Incorporate check for CA dinucleotide at cleavage position to rescue
-##       internally primed regions.
-##
-## TODO: Fill this out when you have time. For now we use quantile.02/.98 as
-##       the define boundaries.
-internalPrimingStats <- function(x, quantile=0.05, unique.only=TRUE, ...) {
-  data.dir <- 'event.info'
-  if (unique.only) {
-    data.dir <- paste(data.dir, 'unique', sep=".")
-  } else {
-    data.dir <- paste(data.dir, 'rescue', sep=".")
-  }
-  data.dir <- file.path(datasetDirectory(x, ...), data.dir)
-  if (is.numeric(quantile)) {
-    if (quantile > 1) {
-      quantile <- quantile / 100
-    }
-    if (quantile > 0.5) {
-      quantile <- 1 - quantile
-    }
-  }
-  fn <- paste('quantile', gsub('0\\.', '', quantile), 'priming.rda', sep=".")
-  fn <- file.path(data.dir, fn)
-  stopifnot(file.exists(fn))
-  load.it(fn)
-}
-
-addPrimingInfo <- function(evts, ip.stats, pa.stats,
-                           event.a.rich=0.65, max.a.rich=0.8,
-                           rescue.polya=kPolyA$dna.signal[1:6],
-                           pa.max.from.end=45L, pa.min.from.end=10L,
-                           anno.rescue=NULL, rescue.from.end=40,
-                           as.mask=FALSE) {
+combinePrimingInfo <- function(evts, ip.stats, pa.stats,
+                               event.a.rich=0.65, max.a.rich=0.8,
+                               rescue.polya=kPolyA$dna.signal[1:6],
+                               pa.max.from.end=45L, pa.min.from.end=10L,
+                               anno.rescue=NULL, rescue.from.end=40,
+                               as.mask=FALSE) {
   ##    The default tresholds to flag events for priming is:
   ##      event.a.rich (iArich) >= 0.65
   ##      a hit from externally.primed.window (ewindow.primed)
+  if (is(evts, "SummarizedExperiment")) {
+    se <- evts
+    evts <- rowData(se)
+  } else {
+    se <- NULL
+  }
   stopifnot(inherits(evts, 'GenomicRanges'))
   stopifnot(inherits(ip.stats, 'DataFrame') && nrow(ip.stats) == length(evts))
   if (is.character(rescue.polya) || isTRUE(rescue.polya)) {
@@ -202,8 +165,6 @@ identifyValidPaSignals <- function(x, pa.stats, pa.min.from.end=10L,
   ans
 }
 
-
-
 identifyCleavagePoint <- function(x, bsg, cleavage.site='CA',
                                   cleavage.window=5L) {
   stopifnot(inherits(x, 'GenomicRanges'))
@@ -265,30 +226,3 @@ identifyCleavagePoint <- function(x, bsg, cleavage.site='CA',
   cs.counts
 }
 
-
-## Look at the internal priming calls.
-
-
-
-## Check which internal priming calls are appropriate
-if (FALSE) {
-  atlas.dir <- '/ikadata2/lianos/data/mayr/ApaAtlas'
-  which.dataset <- '2011-06-14'
-  atlas <- ApaAtlas(atlas.dir, which.dataset)
-
-  peak.info.multimap <- events(atlas, with.priming=FALSE, unique.only=FALSE)
-  peak.info.unique <- events(atlas, with.priming=FALSE, unique.only=TRUE)
-  peak.info <- peak.info.unique
-  e <- peak.info
-
-  ip.05 <- internalPrimingStats(atlas, 0.05)
-  ip.1 <- internalPrimingStats(atlas, 0.1)
-  ip.15 <- internalPrimingStats(atlas, 0.15)
-
-  i <- ip.1
-  values(e) <- values(e)[, c('peak.pos', 'is.distal', 'quantile.1', 'quantile.9')]
-  values(e)$Width <- width(e)
-
-  #absolute + vs. window
-  c1 <- which(i[,1] == 0 & i[,2] != 0)
-}
