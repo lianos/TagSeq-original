@@ -28,5 +28,9 @@ export(internalPrimingSummary,
        annotateSummarizedExperiment,
 
        summarizeTagClustersFromExperiments,
-       identifyPeaksOnChromosome
+       identifyPeaksOnChromosome,
+       quantifyPeakExpression,
+
+       # ApA specific,
+       collectPolyAPositionStatistics
        )

@@ -31,6 +31,7 @@ summarizeTagClustersFromExperiments <-
            bandwidth=34L, resize.reads=FALSE, resize.fix='end', resize.is='max',
            min.count.event.boundary=min(10, length(bamfiles)),
            trim.pos=c(.05, .98), trim.neg=c(.02, .95), min.width=21L,
+           col.data=NULL, expt.data=NULL, annotation=NULL,
            .options.multicore=list(preschedule=FALSE), ...) {
   bamfiles <- checkBamFileList(bamfiles)
   si <- unifySeqinfo(bamfiles)
@@ -67,8 +68,32 @@ summarizeTagClustersFromExperiments <-
     saveRDS(these, file.path(pdir, paste(chr, 'peaks.rds', sep='.')))
   }
 
-  all.peaks <- do.call(c, unname(peaks))
+  all.peaks <- do.call(c, unname(peaks[!sapply(peaks, is.null)]))
+  all.peaks <- all.peaks[order(all.peaks)]
   saveRDS(all.peaks, file.path(outdir, "peaks.rds"))
+
+  ## Did we get an annotated genome?
+  if (!is.null(annotation)) {
+    if (!inherits(annotation, "GenomicRanges")) {
+      ## Ensure that this thing looks like an annotated genome object
+      has.gaps <- length(gaps(annotation)) > 0
+      is.disjoint <- length(findOverlaps(annotation, ignoreSelf=TRUE)) == 0
+      if (has.gaps) {
+        warning("The annotated genome object has gaps -- does not look correct",
+                immediate.=TRUE)
+      }
+      if (!is.disjoint) {
+        warning("The annotated genome object has self overlaps, looks wrong",
+                immediate.=TRUE)
+      }
+      if (!has.gaps && is.disjoint) {
+        all.peaks <- annotateReads(all.peaks, annotation)
+      } else {
+        warning("The annotate genome that was passed in looked fishy, ",
+                "skipping annotation step", immediate.=TRUE)
+      }
+    }
+  }
 
   # ----------------------------------------------------------------------------
   # Calculate expression per peak across bamfiles
@@ -79,6 +104,11 @@ summarizeTagClustersFromExperiments <-
                            bam.filter=bam.filter.quantify,
                            assign.by=assign.by.quantify)
 
+  col.data <- DataFrame(row.names=colnames(peak.counts[[1]]),
+                        library.size=colSums(peak.counts[['count']]))
+  se <- SummarizedExperiment(peak.counts, rowData=all.peaks,
+                             colData=col.data, exptData=expt.data)
+  se
 }
 
 #' Note that this will probably do very weird things to spliced reads
@@ -102,7 +132,7 @@ identifyPeaksOnChromosome <-
     resize.fix <- match.arg(resize.fix)
     resize.is <- match.arg(resize.is)
   }
-  stopifnot(is(bam.param, 'ScanBamParams'))
+  stopifnot(is(bam.param, 'ScanBamParam'))
   bamfiles <- checkBamFileList(bamfiles, clean.names=FALSE)
   si <- unifySeqinfo(bamfiles)
   chr.info <- subset(si, seqnames == chr)
@@ -205,7 +235,7 @@ identifyPeaksOnChromosome <-
 quantifyPeakExpression <-
   function(peaks, bamfiles, chrs=NULL, stranded=TRUE,
            assign.by='unique-quantify', bam.param=bwaSamseParams(),
-           bam.filter=bwaSamseFilter(unique.only=FALSE)) {
+           bam.filter=bwaSamseFilter(unique.only=TRUE)) {
   stopifnot(inherits(peaks, "GenomicRanges"))
   bamfiles <- checkBamFileList(bamfiles, clean.names=TRUE)
 
@@ -221,7 +251,7 @@ quantifyPeakExpression <-
 
   SimpleList(count=sapply(tabulated, '[[', 'count'),
              percent=sapply(tabulated, '[[', 'percent'))
-)
+}
 
 # ------------------------------------------------------------------------------
 # Helper functions for parameter checking and whatnot

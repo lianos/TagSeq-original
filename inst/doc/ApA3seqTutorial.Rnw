@@ -1,0 +1,117 @@
+%\VignetteIndexEntry{Analyzing 3seq Data}
+%\VignettePackage{TagSeq}
+
+% To compile this document
+% library('cacheSweave')
+% rm(list=ls())
+% Sweave('ApA3seqTutorial.Rnw', driver=cacheSweaveDriver())
+
+\documentclass[11pt]{article}
+
+\usepackage{url}
+
+\newcommand{\Rfunction}[1]{{\texttt{#1}}}
+\newcommand{\Robject}[1]{{\texttt{#1}}}
+\newcommand{\Rpackage}[1]{{\textit{#1}}}
+\newcommand{\Rmethod}[1]{{\texttt{#1}}}
+\newcommand{\Rfunarg}[1]{{\texttt{#1}}}
+\newcommand{\Rclass}[1]{{\textit{#1}}}
+\newcommand{\Rcode}[1]{{\texttt{#1}}}
+\newcommand{\software}[1]{\textsf{#1}}
+\newcommand{\R}{\software{R}}
+
+\pagestyle{empty}
+\usepackage[usenames,dvipsnames]{xcolor}
+\usepackage{helvet}
+\usepackage[titletoc]{appendix}
+\usepackage{tocloft}
+
+\setlength{\parindent}{0em}
+\setlength{\parskip}{.5em}
+
+\renewcommand{\familydefault}{\sfdefault}
+
+\newcommand{\Rcode}[1]{{\texttt{#1}}}
+\newcommand{\Robject}[1]{{\small\texttt{#1}}}
+\newcommand{\Rfunction}[1]{\Robject{#1}}
+\newcommand{\Rpackage}[1]{\textit{#1}}
+\newcommand{\Rclass}[1]{\textit{#1}}
+
+\title{Analysis of 3'seq data, a tutorial}
+\author{Steve Lianoglou}
+
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE,eps=FALSE,pdf=FALSE,png=TRUE,include=FALSE,width=4,height=4.5,resolution=150}
+\setkeys{Gin}{width=0.5\textwidth}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhead{}
+\fancyfoot{}
+\lfoot{}\cfoot{}\rfoot{}
+\renewcommand{\headrule}{}
+
+\usepackage{graphicx}
+%\usepackage{xstring}
+
+\begin{document}
+
+\makektitle
+
+\section{Introduction}
+
+This vignette assumes that the raw reads have been preprocessed and aligned. The
+\texttt{inst/scripts} directory has utility scripts to do so, namely
+\texttt{multiplex-preprocess}. Run \textt{multiplex-preprocess -h} from the
+command line for help on how to use it. Some Python utilities I wrote are also
+required for that to work, and you'll find those in the seqtools github repo,
+under the \texttt{Python} folder. Instructions on how to install that stuff
+should be on the github wiki for that project.
+
+\section{Processing aligned reads}
+
+<<initEnvironment>>=
+suppressPackageStartupMessages({
+  library(TagSeq2)
+  library(doParallel)
+  ## You do not have to load the following packages to run
+  ## the pipeline as they are imported into the TagSeq pacakge
+  library(Rsamtools)
+  library(GenomicCache)
+  library(biosignals)
+  library(data.table)
+  library(SeqTools)
+
+})
+
+## Load the genome annotation object
+anno <- readRDS(system.file("extdata", "annotated.genome.hg19.rds",
+                            package="TagSeq"))
+
+## paths to BAM files
+bams <- c('en7-1/en7-1.bam', 'en7-2/en7-2.bam', 'en7-3/en7-3.bam',
+          'en7-4/en7-4.bam')
+bams <- file.path('/Volumes/Trilogy/data/mayr/++raw/2013-02-20', bams)
+outdir <- '/Volumes/Trilogy/atlases/ApaAtlas/hg19/datasets/2013-02-20-ed'
+## Setup ||-ization strategy
+registerDoParallel(cores=8)
+
+## Identify some peaks
+chrs <- paste('chr', c(1:22, 'X'), sep='')
+peaks <- mclapply(chrs, function(chr) {
+  identifyPeaksOnChromosome(bams, chr)
+}, mc.cores=8L)
+peaks <- do.call(c, unname(peaks))
+peaks <- peaks[order(peaks)]
+
+qpeaks <- quantifyPeakExpression(peaks, bams, chrs=chrs)
+
+@
+
+
+\section{Session Information}
+
+<<SessionInfo, echo=FALSE>>=
+sessionInfo()
+@
+\end{document}
