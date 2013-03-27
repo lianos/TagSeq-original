@@ -1,31 +1,46 @@
 #!/usr/bin/env Rscript
 
+# TODO: This needs to modified so that the tabulateReads step parallelizes
+#       over chromosomes, and not BAM files -- I think this should be more
+#       handy to make this ||-ize over the cluster
 details <- "
-  Quantifies a previously identified set of peaks.
+  Counts the number of reads aligning to a set of defined peaks and rips
+  the result into a SummarizedExperiment saved to OUTFILE. If OUTFILE is
+  missing, the output defaults to:
+
+    file.path(dirname(config$peakfile), 'quantified-peaks.rds')
 
   The required CONFIGURATION.yaml stores all of the particular parameters
   for the analysis and is required to be fully specified. This file will be
-  copied into the `outdir` for posterity (and your sanity) so you remember
-  what parameters were used for the analysis.
+  copied into the same directory as OUTFILE and saved with the `--runconfig`
+  filename.
+
+  Specifying the chromosomes to process
+  -------------------------------------
+
+    The `chrs` parameter is accepted via command line flags so that they can
+    be specified in such a way to make this easy to parallelize over the
+    cluster. These must be in a comma separated list with no spaces. If this
+    parameter is not passed in, all chromosomes found in the BAM files will be
+    used.
+
+    Any `chrs` parameter found in the CONFIGURATION.yaml file will be ignored.
+    The chromosomes that were used will be saved into the `--runconfig` file,
+    however.
 
   Packages required:
     - optparse v1.0.1   [CRAN]
     - yaml     v2.1.7   [CRAN]
+    - doParallel        [CRAN]
     - TagSeq            [https://github.com/lianos/TagSeq]
-"
+    - GenomicCache      [https://github.com/lianos/GenomicCache]"
 
-## Use `optparse` to configure and parse command line arguments.
-suppressPackageStartupMessages({
-  if (!require(optparse)) {
-    err('The optparse library needed, please install via:\n',
-        'install.packages("optparse", repos="http://R-Forge.R-project.org")')
-  }
-})
+reqs <- c("optparse", "TagSeq", "SeqTools", "Rsamtools", "doParallel",
+          "GenomicCache")
 
 ################################################################################
 ## Generic Rscript setup
 ## -----------------------------------------------------------------------------
-
 ## Insures that Rscript will exit during an uncaught error
 options(error=function(err) {
   banner <- paste(rep("=", 80), collapse="")
@@ -33,25 +48,241 @@ options(error=function(err) {
       "Exiting ...", banner, "", sep="\n")
   quit(save='no', status=1)
 })
-
 ## Exit script with user supplied error
 err <- function(..., sep=" ") {
   msg <- paste(unlist(list(...)), sep=sep)
   cat("ERROR:", msg, "\n")
   quit(save='no', status=1)
 }
-
 dir.exists <- function(path) {
   path <- as.character(path)
   sapply(file.info(path)$isdir, isTRUE)
 }
 
-################################################################################
-## Particulars of the script start here
-usage <- paste("%prog [OPTIONS] CONFIGURATION.yaml", details, sep="\n")
-opt.list <-
-  list(make_option(c("-o", "--outdir"), default=".", type="character",
-                   help="The directory to output the results to"),
-       make_option(c("-c", "--chrs"), default=NULL, type="character",
-                   help="A subset of the chromosomes to run the analysis on")
+missing.pkgs <- setdiff(reqs, dir(.libPaths()))
+if (length(missing.pkgs)) {
+  err("Required packages are missing:\n  ", paste(missing.pgks, collapse=","))
+}
 
+
+################################################################################
+## Particulars of the script starts here
+suppressPackageStartupMessages({
+  library(optparse)
+  library(yaml)
+  library(GenomicRanges)
+})
+
+usage <- paste("%prog [OPTIONS] CONFIGURATION.yaml [OUTFILE]\n", details)
+option.list <-
+  list(
+       make_option(c("-c", "--chrs"), default=NULL, type="character",
+                   help="A subset of the chromosomes to run the analysis on"),
+       make_option(c("-t", "--threads"), default=4, type="integer",
+                   help="The number of cores to use for this process"),
+       make_option(c("-r", "--runconfig"), default="quantify-run-config.yaml",
+                   help="The filename saved in outdir w/ the params used for this run"),
+       make_option(c('-v', '--verbose'), default=FALSE, action="store_true",
+                   help="Make some noise")
+       )
+
+parser <- OptionParser(usage=usage, option_list=option.list)
+parsed <- parse_args(parser, positional_arguments=TRUE)
+opts <- parsed$options
+args <- parsed$args
+verbose <- opts$verbose
+
+## -----------------------------------------------------------------------------
+## Check script inputs
+if (length(args) == 0) {
+  err("CONFIGURATION.yaml file needs to be specified")
+}
+
+# Check configuration
+yfile <- args[1]
+if (!file.exists(yfile)) {
+  err("configuration yaml file not found")
+}
+config <- yaml.load_file(yfile)
+
+# Check peak file fron config.yaml
+if (!is.character(config$peakfile)) {
+  err("peakfile not specified in CONFIGURATION.yaml")
+}
+if (!file.exists(config$peakfile)) {
+  err("peakfile not found:", config$peakfile)
+}
+peaks <- readRDS(config$peakfile)
+peaks.chrs <- as.character(unique(seqnames(peaks)))
+
+# Check desired output file is "kosher"
+if (length(args) > 1) {
+  outfile <- args[2]
+} else {
+  # If OUTFILE is not specified, we create a default name and put it
+  # next to the input peak file
+  outfile <- file.path(dirname(config$peakfile), 'quantified-peaks.rds')
+}
+if (file.exists(outfile)) {
+  err("The output file already exists")
+}
+
+out.dir <- dirname(outfile)
+if (!dir.exists(out.dir)) {
+  err("Directory does not exist to save the output file:", out.dir)
+}
+
+run.config <- file.path(out.dir, opts$runconfig)
+if (file.exists(run.config)) {
+  err("Output run configuration already exists, remove it or change its name:\n",
+      run.config)
+}
+
+# Parse specified chromosomes. If none are set, take all the chromosomes
+# that make an appearence in the specified `peaks` object
+chrs <- opts$chrs
+if (is.null(chrs)) {
+  chrs <- peaks.chrs
+} else {
+  if (!is.character(chrs)) {
+    err("Illegal value for chrs")
+  }
+  chrs <- intersect(peaks.chrs, unlist(strsplit(chrs, ",")))
+}
+if (length(chrs) == 0) {
+  err("None of the chromosomes specified are found in the `peaks` object")
+}
+
+## -----------------------------------------------------------------------------
+## Check parameters for peak quantification
+if (verbose) message("Checking parameters in configuration file ...")
+
+if (!is.null(config$chrs)) {
+  message("WARNING: chrs specified in CONFIGURATION.yaml are ignored, ",
+          "use, eg. `--chrs chr21,chr22`")
+}
+
+bamfiles <- unlist(config$bamfiles)
+if (!is.character(bamfiles)) {
+  err("Illegal input for bamfiles in config file")
+}
+if (is.null(names(bamfiles))) {
+  err("bamfiles require names")
+}
+if (any(duplicated(names(bamfiles)))) {
+  err("bamfiles require unique names")
+}
+if (!all(file.exists(bamfiles))) {
+  wut <- bamfiles[!file.exists(bamfiles)]
+  err("Can't read bamfiles:", paste(wut, collapse="\n"))
+}
+
+if (!is.logical(config$stranded) && length(config$stranded) == 1L) {
+  err("Missing stranded config")
+}
+
+if (is.null(config$rm_no_coverage)) {
+  config$rm_no_coverage <- TRUE
+}
+if (!is.logical(config$rm_no_coverage) ||
+    length(config$rm_no_coverage) != 1) {
+  err("Illegal value for rm_no_coverage")
+}
+
+# You probably want to specify a uniquenes filter here
+if (is.null(config$bam_filter)) {
+  bam.filter <- NULL
+} else {
+  bam.filter <- tryCatch({
+    stopifnot(is.character(config$bam_filter))
+    eval(parse(text=config$bam_filter))
+  }, error=function(e) NULL)
+  if (is.null(bam.filter)) {
+    err("bam_filter has to be a string that parses to a valid R function")
+  }
+}
+
+if (is.null(config$assign_by)) {
+  config$assign_by <- 'unique-quantify'
+}
+if (!config$assign_by %in% c('unique-quantify', 'unique-fix', 'all')) {
+  err("Illegal value for assign_by")
+}
+if (config$assign_by %in% 'unique-fix') {
+  if (config$assign_fix %in% c('start', 'end', 'center')) {
+    err("assign_fix needs to be set to start, end, or center when ",
+        "assign_by is unique-fix")
+  }
+}
+
+if (config$assign_by != 'unique-quantify') {
+  # TODO: Support all assign.by permutations
+  err("Only assign_by=unique-quantify is supported from this script now")
+}
+
+# ------------------------------------------------------------------------------
+# Load up required packages
+if (verbose) message("Loading required packages ...")
+suppressPackageStartupMessages({
+  for (req in reqs) {
+    if (!require(req, character.only=TRUE)) {
+      err("Required package missing: ", req)
+    }
+  }
+})
+
+if (opts$threads > 1) {
+  registerDoParallel(opts$threads)
+  parallel <- TRUE
+} else {
+  registerDoSEQ()
+  parallel <- FALSE
+}
+
+bam.param <- ScanBamParam(flag=scanBamFlag(isUnmappedQuery=FALSE))
+if (is.character(config$bam_tags)) {
+  bamTag(bam.param) <- config$bam_tags
+} else {
+  config <- c(config, bam_tags=NULL)
+}
+
+## =============================================================================
+## Let it rip
+
+# Resolve chromosomes previously specified with those found in the bamfiles
+bamfiles <- TagSeq:::checkBamFileList(bamfiles)
+si <- TagSeq:::unifySeqinfo(bamfiles)
+bad.chrs <- setdiff(chrs, si$seqnames)
+if (length(bad.chrs) > 0) {
+  message("Chromosomes not found in BAM files: ", paste(bad.chrs, collapse=","))
+  message("They will be skipped")
+  chrs <- intersect(chrs, si$seqnames)
+}
+if (length(chrs) == 0) {
+  err("No chromosomes found to run on")
+}
+config$chrs <- chrs
+
+message("Starting peak quantification")
+config$run_start <- Sys.time()
+
+peak.counts <-
+  quantifyPeakExpression(peaks, bamfiles, chrs=chrs, stranded=config$stranded,
+                         assign.by=config$assign_by, bam.param=bam.param,
+                         bam.filter=bam.filter)
+
+col.data <- DataFrame(row.names=colnames(peak.counts[[1]]),
+                      library.size=colSums(peak.counts[['count']]))
+se <- SummarizedExperiment(peak.counts, rowData=peaks, colData=col.data)
+
+if (config$rm_no_coverage) {
+  if (verbose) {
+    message("Removing 0 coverage peaks")
+  }
+  se <- se[rowSums(assay(se)) > 0]
+}
+
+saveRDS(se, outfile)
+
+config$run_end <- Sys.time()
+cat(as.yaml(config), file=run.config)

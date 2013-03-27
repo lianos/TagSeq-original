@@ -1,11 +1,10 @@
+# To specify a subset of chromosomes to operate on, use the --chrs command line
+# flag. It is done this way so that we can use the same configuration file here
+# in order to parallelize the peak detection per chromosome over the cluster.
 genome: mm9
 bamfiles:
   wt: "/Users/stavros/cBio/data/aly/bowtie2/mir155-wt.bam"
   ko: "/Users/stavros/cBio/data/aly/bowtie2/mir155-ko.bam"
-chrs:
-  # (Leave out the chrs section if you want to run on all chromsomes)
-  - chr18
-  - chr19
 stranded: TRUE
 bandwidth: 35
 resize_reads: 32

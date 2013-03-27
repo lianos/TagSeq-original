@@ -93,14 +93,13 @@ summarizeTagClustersFromExperiments <-
   message("Calculating expression of peaks per bamfile")
   peak.counts <-
     quantifyPeakExpression(all.peaks, bamfiles, chrs=chrs, stranded=stranded,
-                           param=bam.param.quantify,
+                           bam.param=bam.param.quantify,
                            bam.filter=bam.filter.quantify,
                            assign.by=assign.by.quantify)
 
   col.data <- DataFrame(row.names=colnames(peak.counts[[1]]),
                         library.size=colSums(peak.counts[['count']]))
-  se <- SummarizedExperiment(peak.counts, rowData=all.peaks,
-                             colData=col.data, exptData=expt.data)
+  se <- SummarizedExperiment(peak.counts, rowData=all.peaks, colData=col.data)
   se
 }
 

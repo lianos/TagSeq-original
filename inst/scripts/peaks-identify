@@ -5,8 +5,21 @@ details <- "
 
   The required CONFIGURATION.yaml stores all of the particular parameters
   for the analysis and is required to be fully specified. This file will be
-  copied into the `outdir` for posterity (and your sanity) so you remember
-  what parameters were used for the analysis.
+  copied into the `outdir` as `--runconfig` for posterity (and your sanity)
+  so you will have a record of the parameters used to generate the results.
+
+  Specifying the chromosomes to process
+  -------------------------------------
+
+    The `chrs` parameter is accepted via command line flags so that they can
+    be specified in such a way to make this easy to parallelize over the
+    cluster. These must be in a comma separated list with no spaces. If this
+    parameter is not passed in, all chromosomes found in the BAM files will be
+    used.
+
+    Any `chrs` parameter found in the CONFIGURATION.yaml file will be ignored.
+    The chromosomes that were used will be saved into the `--runconfig` file,
+    however.
 
   A `chr.peaks` directory will be created in `outdir` if it does not exist
   already and the peaks found on each chromosome will be saved in there.
@@ -53,17 +66,23 @@ if (length(missing.pkgs)) {
 
 ################################################################################
 ## Particulars of the script starts here
-library(optparse)
-library(yaml)
+suppressPackageStartupMessages({
+  library(optparse)
+  library(yaml)
+})
 
 usage <- paste("%prog [OPTIONS] CONFIGURATION.yaml\n", details)
 option.list <-
   list(make_option(c("-o", "--outdir"), default=".", type="character",
                    help="The directory to output the results to"),
        make_option(c("-c", "--chrs"), default=NULL, type="character",
-                   help="A subset of the chromosomes to run the analysis on"),
+                   help=paste("A subset of the chromosomes to process",
+                              "specified as a comma-separated list with",
+                              "no spaces, eg. `--chrs chr20,chr21,chr22`")),
        make_option(c("-t", "--threads"), default=4, type="integer",
                    help="The number of cores to use for this process"),
+       make_option(c("-r", "--runconfig"), default="identify-run-config.yaml",
+                   help="The filename saved in outdir w/ the params used for this run"),
        make_option(c('-v', '--verbose'), default=FALSE, action="store_true",
                    help="Make some noise")
        )
@@ -74,14 +93,17 @@ opts <- parsed$options
 args <- parsed$args
 verbose <- opts$verbose
 
+## -----------------------------------------------------------------------------
+## Check script inputs
+if (length(args) == 0) {
+  err("CONFIGURATION.yaml file needs to be specified")
+}
 yfile <- args[1]
 if (!file.exists(yfile)) {
   err("configuration yaml file not found")
 }
 config <- yaml.load_file(yfile)
 
-## -----------------------------------------------------------------------------
-## Check script inputs
 out.dir <- opts$outdir
 peak.dir <- file.path(out.dir, 'chr.peaks')
 
@@ -96,9 +118,29 @@ if (!dir.exists(peak.dir)) {
   }
 }
 
+run.config <- file.path(out.dir, opts$runconfig)
+if (file.exists(run.config)) {
+  err("Output run configuration already exists, remove it or change its name:\n",
+      run.config)
+}
+
+chrs <- opts$chrs
+if (!is.null(chrs)) {
+  if (!is.character(chrs)) {
+    err("Illegal value for chrs")
+  }
+  chrs <- unlist(strsplit(chrs, ","))
+}
+
 ## -----------------------------------------------------------------------------
 ## Check parameters for peak calling
 if (verbose) message("Checking parameters in configuration file ...")
+
+if (!is.null(config$chrs)) {
+  message("WARNING: chrs specified in CONFIGURATION.yaml are ignored, ",
+          "use, eg. `--chrs chr21,chr22`")
+}
+
 bamfiles <- unlist(config$bamfiles)
 if (!is.character(bamfiles)) {
   err("Illegal input for bamfiles in config file")
@@ -197,23 +239,31 @@ if (is.character(config$bam_tags)) {
 
 ## =============================================================================
 ## Let it rip
-pkgs <- c('TagSeq', 'biosignals', 'GenomicRanges', 'Rsamtools')
 
 # Resolve chromosomes
 bamfiles <- TagSeq:::checkBamFileList(bamfiles)
 si <- TagSeq:::unifySeqinfo(bamfiles)
-if (is.null(config$chrs)) {
-  config$chrs <- si$seqnames
+if (is.null(chrs)) {
+  chrs <- si$seqnames
 }
-config$chrs <- unique(config$chrs)
-bad.chrs <- setdiff(config$chrs, si$seqnames)
+chrs <- unique(chrs)
+bad.chrs <- setdiff(chrs, si$seqnames)
 if (length(bad.chrs) > 0) {
   message("Chromosomes not found in BAM files: ", paste(bad.chrs, collapse=","))
+  message("They will be skipped")
+  chrs <- intersect(chrs, si$seqnames)
 }
+if (length(chrs) == 0) {
+  err("No chromosomes found to run on")
+}
+config$chrs <- chrs
 
-config$run_start <- Sys.time()
+
 message("Starting peak calling")
-peaks <- foreach(chr=config$chrs, .packages=pkgs, .errorhandling="pass",
+config$run_start <- Sys.time()
+pkgs <- c('TagSeq', 'biosignals', 'GenomicRanges', 'Rsamtools')
+
+peaks <- foreach(chr=chrs, .packages=pkgs, .errorhandling="pass",
                  .options.multicore=list(preschedule=FALSE)) %loop% {
   if (verbose) {
     message("===", chr, "===")
@@ -263,15 +313,43 @@ if (do.annotation) {
       do.anntation <- FALSE
     }
   }
+
+  if (is.null(config$assign_by) || !config$assign_by %in% c('quantify', 'fix')) {
+    config$assign_by <- 'quantify'
+    message("Unrecognized `assign_by` value, using 'quantify'")
+  }
+
+  if (config$assign_by == 'fix') {
+    if (is.null(config$assign_fix) || !config$assifn_fix %in% c('center', 'start', 'end')) {
+      config$assign_fix <- 'center'
+      message("Unrecognized `assign_fix` value, using 'center'")
+    }
+    if (!is.numeric(config$assign_fix_width)) {
+      config$assign_fix_width <- 1L
+      message("Unrecognized assign_fix_width, using 1")
+    }
+  } else if (config$assign_by == 'quantify') {
+    # Nuke these from the serialized run-config
+    config$assign_fix <- NULL
+    config$assign_fix_width <- NULL
+  }
 }
+
 if (do.annotation) {
   if (verbose) message("Annotating peaks")
-  all.peaks <- annotateReads(all.peaks, annotation)
+  all.peaks <- annotateReads(all.peaks, annotation,
+                             assign.by=config$assign_by,
+                             fix=config$assign_fix,
+                             fix.width=config$assign_fix_width[1L])
   saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds"))
 } else {
   config$annotation <- NULL
+  config$assign_by <- NULL
+  config$assign_fix <- NULL
+  config$assign_fix_width <- NULL
+
   config <- c(config, list(annotation=NULL))
 }
 
 config$run_end <- Sys.time()
-cat(as.yaml(config), file=file.path(out.dir, "run-config.yaml"))
+cat(as.yaml(config), file=run.config)

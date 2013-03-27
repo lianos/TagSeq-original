@@ -1,35 +1,97 @@
+# To specify a subset of chromosomes to operate on, use the --chrs command line
+# flag. It is done this way so that we can use the same configuration file here
+# in order to parallelize the peak detection per chromosome over the cluster.
+
+# This isn't actually used yet, but maybe should be for sanity checks
 genome: hg19
+
+# The list of BAM files to use for quantification. These files must be named
+# and their names will be used as the names of the assays in the output
 bamfiles:
   bcells.1: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam"
   bcells.2: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam"
-chrs:
-  # (Leave out the chrs section if you want to run on all chromsomes)
-  - chr21
-  - chr22
+
+# Tell the algorithm if the protocol used was from a stranded assay. In theory
+# this should be useful, but you really don't want to set this to FALSE as
+# I don't think I've really debugged that.
 stranded: TRUE
+
+# The bandwidth of the kernel to use for the edge detector. Somewhere in the
+# 30's has been working good for me.
 bandwidth: 35
+
+# If this number is numeric, reads will be resized from the size reported in
+# the BAM file. This is helpful to mitigate the "weird peak landscapes" that
+# can arise from peaks with a mix of short/long reads so that you don't have
+# to create a kernel with a very large bandwidth.
 resize_reads: 32
-resize_fix: end
+
+# Is the number provided in resize_reads a minimum or maximum length the reads
+# should be? Possible values are: min, max, absolute
 resize_is: min
+
+# If the reads are going to be resized, which side of the read serves as the
+# anchor? Possible values include end, start, center. For 3'seq data, we use
+# end since the end (3'-end) of the alignment is used to nail the cleavage site.
+resize_fix: end
+
+# The minimum number of reads an "island of coverage" needs to have in order
+# to qualify for "peak calling"
 min_count_event_boundary: 5
+
+# Percentiles of the start and end (left, right) of the peak to trim before
+# calling peaks on islands of coverage on the positive strand
 trim_pos:
   - 0.05
   - 0.98
+
+# Percentiles of the start and end (left, right) of the peak to trim before
+# calling peaks on islands of coverage on the negative strand
 trim_neg:
   - 0.02
   - 0.95
-bam_tags:
-  - X0
-  - X1
-  - XM
-  - XA
-# bam.filter needs to parse into an R function. It will take in a
+
+# Tags to include in the reads when loading them from the BAM file. This is
+# useful to use in conjunction with the bam_filter function. I use all mapped
+# reads to identify the shape and location of peaks, and uniquely mapping reads
+# to quantify their expression -- it seems to work well this way in practice.
+# bam_tags:
+#   - X0
+#   - X1
+#   - XM
+#   - XA
+
+# bam_filter needs to parse into an R function. It will take in a
 # GappedReads (Granges-like) object and must return the same type of
-# object containing only the ranges you want analyzed. for peak identification
-# I don't do any filtering
+# object containing only the ranges you want analyzed.
+#
+# The filter below just returns all the things passed to it. I use all mapped
+# reads for peak identification purposes, and only uniquely mapped reads
+# when doing the quantification step.
 bam_filter: |
   function(x) {
     x
   }
+
+# This doesn't actually do anything right now
 min_width: 24
+
+################################################################################
+# These parameters are concerned with the (optional) annotation of the
+# identified peaks, these will only be used if `annotation` is a valid path
+# to an annotated genome obejct
 annotation: "/Users/stavros/cBio/projects/TagSeq/inst/extdata/annotated.genome.hg19.rds"
+
+# Method used to assign one annotation to each peak. The default is
+# unique-quantify, which uses the SeqTools::assignUniqueOverlaps function to
+# assign each peak to one and only one genomic annotation, which will be the
+# annotation the peak shares maximal overlap with. Possible values are
+# `quantify` and `fix`.
+assign_by: quantify
+
+# Only used if assign_by is `fix`. Possible values are:
+#   `center`, `end`, `start`
+assign_fix: center
+
+# Only used if assign_by is `fix`
+assign_fix_width: 1
