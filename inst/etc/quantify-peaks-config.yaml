@@ -1,21 +1,41 @@
+# To specify a subset of chromosomes to operate on, use the --chrs command line
+# flag. It is done this way so that we can use the same configuration file here
+# in order to parallelize the peak detection per chromosome over the cluster.
+
+# This isn't actually used yet, but maybe should be for sanity checks
 genome: hg19
+
+# The (preferablly full) path to the peaks GenomicRanges object that is saved
+# with saveRDS
+peakfile: "annotated-peaks.rds"
+
+# The list of BAM files to use for quantification. These files must be named
+# and their names will be used as the names of the assays in the output
 bamfiles:
   bcells.1: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam"
   bcells.2: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam"
-peakfile: "annotated-peaks.rds"
-chrs:
-  # Leave out the chrs section if you want to run on all chromsomes that are
-  # defined in the peaks
-  - chr21
-  - chr22
+
+# Tell the algorithm if the protocol used was from a stranded assay. In theory
+# this should be useful, but I'm pretty sure a FALSE value isn't supported
+# right now.
 stranded: TRUE
+
+# Defaults to TRUE, and removed peaks form `peakfile` that have 0 read coverage
+# from all bam files
+rm_no_coverage: TRUE
+
+# The tags to include in the reads when they are loaded into memory. Use this
+# in conjunction with the bam_filter to win.
 bam_tags:
   - X0
-# bam.filter needs to parse into an R function. It will take in a
-# GappedReads (Granges-like) object and must return the same type of
+
+# bam_filter needs to parse into an R function. It will take in a
+# GappedReads (GRanges-like) object and must return the same type of
 # object containing only the ranges you want analyzed.
-# The filter below works with single ended BWA alignments to ensure that only
-# uniquely mapping reads are used
+#
+# You probably want a uniqueness filter that is specific to your aligner for
+# quantifcation purposes. The one specified below returns uniquely mapped,
+# single-end reads from BWA 0.5.x
 bam_filter: |
   function(x) {
     if (!"X0" %in% names(mcols(x))) {
@@ -23,3 +43,15 @@ bam_filter: |
     }
     x[mcols(x)$X0 == 1]
   }
+
+# Method used to assign one peak to reads that hit multiple peaks. The default
+# is unique-quantify, which uses the SeqTools::assignUniqueOverlaps function
+# to assign each read to one and only one peak. unique-quantify assigns the
+# read to the peak that it shares the maximal overlap with. In theory, all
+# possible params should be supported, but I'm pretty sure only this one is
+# for now
+assign_by: unique-quantify
+
+# Only used if assign_by is assign-fix. Currently this isn't supported, but
+# here's hoping to the future.
+assign_fix: end
