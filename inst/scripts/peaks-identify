@@ -184,7 +184,7 @@ if (opts$threads > 1) {
   registerDoParallel(opts$threads)
   '%loop%' <- getFunction('%dopar%')
 } else {
-  registerDoSeq()
+  registerDoSEQ()
   '%loop%' <- getFunction('%do%')
 }
 
@@ -201,7 +201,7 @@ pkgs <- c('TagSeq', 'biosignals', 'GenomicRanges', 'Rsamtools')
 
 # Resolve chromosomes
 bamfiles <- TagSeq:::checkBamFileList(bamfiles)
-si <- unifySeqinfo(bamfiles)
+si <- TagSeq:::unifySeqinfo(bamfiles)
 if (is.null(config$chrs)) {
   config$chrs <- si$seqnames
 }
@@ -211,14 +211,15 @@ if (length(bad.chrs) > 0) {
   message("Chromosomes not found in BAM files: ", paste(bad.chrs, collapse=","))
 }
 
+config$run_start <- Sys.time()
 message("Starting peak calling")
-peaks <- foreach(chr=config$chrs, .packages=pkgs,
+peaks <- foreach(chr=config$chrs, .packages=pkgs, .errorhandling="pass",
                  .options.multicore=list(preschedule=FALSE)) %loop% {
   if (verbose) {
     message("===", chr, "===")
   }
   these <-
-    identifyPeaksOnChromosome(bamfiles, stranded=config$stranded,
+    identifyPeaksOnChromosome(bamfiles, chr, stranded=config$stranded,
                               bandwidth=config$bandwidth,
                               resize.reads=config$resize_reads,
                               resize.fix=config$resize_fix,
@@ -229,13 +230,23 @@ peaks <- foreach(chr=config$chrs, .packages=pkgs,
                               bam.flag=scanBamFlag(isUnmappedQuery=FALSE),
                               bam.filter=bam.filter)
   saveRDS(these, file.path(peak.dir, paste(chr, 'peaks.rds', sep='.')))
+  these
 }
 
-all.peaks <- do.call(c, unname(peaks[!sapply(peaks, is.null)]))
+errs <- sapply(peaks, is, 'simpleError')
+if (any(errs)) {
+  for (x in peaks[errs]) {
+    message("Error during peak calling: ", as.character(x))
+  }
+  err("... no point in continuing, bye bye")
+}
+
+all.peaks <- suppressWarnings(do.call(c, unname(peaks[!sapply(peaks, is.null)])))
 all.peaks <- all.peaks[order(all.peaks)]
 saveRDS(all.peaks, file.path(out.dir, "peaks.rds"))
 
-## Did we get an annotated genome?
+## -----------------------------------------------------------------------------
+## Time to annotate the peaks?
 do.annotation <- is.character(config$annotation)
 annotation <- NULL
 if (do.annotation) {
@@ -245,20 +256,22 @@ if (do.annotation) {
     do.annotation <- FALSE
   } else {
     annotation <- readRDS(config$annotation)
-    if (!GenomicCache::isValidAnnotatedGenome(annotation)) {
-      message("The annotation object does not pass the smoke tests")
-      do.annotation <- FALSE
+    is.valid <- GenomicCache::isValidAnnotatedGenome(annotation)
+    if (!isTRUE(is.valid)) {
+      message("The annotation object does not pass the smoke tests:\n",
+              paste(is.valid, collapse="\n  "))
+      do.anntation <- FALSE
     }
   }
 }
 if (do.annotation) {
-  if (verbose) message("Annotated peaks")
+  if (verbose) message("Annotating peaks")
   all.peaks <- annotateReads(all.peaks, annotation)
-  saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds")))
+  saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds"))
 } else {
   config$annotation <- NULL
   config <- c(config, list(annotation=NULL))
 }
 
-config$daterun <- Sys.time()
+config$run_end <- Sys.time()
 cat(as.yaml(config), file=file.path(out.dir, "run-config.yaml"))

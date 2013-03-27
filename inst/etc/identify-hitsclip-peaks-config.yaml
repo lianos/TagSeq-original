@@ -1,13 +1,35 @@
-genome: hg19
-bandwidth: 35
-min.count.event.boundary: 5
-min.width: 24
-trim.pos:
-  - 0.05
-  - 0.98
-trim.neg:
-  - 0.02
-  - 0.95
+genome: mm9
 bamfiles:
-  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam
-  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam
+  wt: "/Users/stavros/cBio/data/aly/bowtie2/mir155-wt.bam"
+  ko: "/Users/stavros/cBio/data/aly/bowtie2/mir155-ko.bam"
+chrs:
+  # (Leave out the chrs section if you want to run on all chromsomes)
+  - chr18
+  - chr19
+stranded: TRUE
+bandwidth: 35
+resize_reads: 32
+resize_fix: start
+resize_is: min
+min_count_event_boundary: 2
+trim_pos:
+  - 0.02
+  - 0.98
+trim_neg:
+  - 0.02
+  - 0.98
+bam_tags:
+  - X0
+  - X1
+  - XM
+  - XA
+# bam.filter needs to parse into an R function. It will take in a
+# GappedReads (Granges-like) object and must return the same type of
+# object containing only the ranges you want analyzed. for peak identification
+# I don't do any filtering
+bam_filter: |
+  function(x) {
+    x
+  }
+min_width: 24
+annotation: "/Users/stavros/cBio/projects/TagSeq/inst/extdata/annotated.genome.mm9.rds"

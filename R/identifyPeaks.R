@@ -54,7 +54,7 @@ summarizeTagClustersFromExperiments <-
                    .options.multicore=.options.multicore) %dopar% {
     message("===", chr, "===")
     these <-
-      identifyPeaksOnChromosome(bamfiles, stranded=stranded,
+      identifyPeaksOnChromosome(bamfiles, chr, stranded=stranded,
                                 bandwidth=bandwidth, resize.reads=resize.reads,
                                 resize.fix=resize.fix, resize.is=resize.is,
                                 min.count.event.boundary=min.count.event.boundary,
@@ -63,9 +63,18 @@ summarizeTagClustersFromExperiments <-
                                 bam.flag=bam.flag.peaks,
                                 bam.filter=bam.filter.peaks)
     saveRDS(these, file.path(pdir, paste(chr, 'peaks.rds', sep='.')))
+    these
   }
 
-  all.peaks <- do.call(c, unname(peaks[!sapply(peaks, is.null)]))
+  errs <- sapply(peaks, is, 'simpleError')
+  if (any(errs)) {
+    for (x in peaks[errs]) {
+      message("Error during peak calling: ", as.character(x))
+    }
+    stop("... no point in continuing, bye bye")
+  }
+
+  all.peaks <- suppressWarnings(do.call(c, unname(peaks[!sapply(peaks, is.null)])))
   all.peaks <- all.peaks[order(all.peaks)]
   saveRDS(all.peaks, file.path(outdir, "peaks.rds"))
 
