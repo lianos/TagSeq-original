@@ -72,6 +72,7 @@ parser <- OptionParser(usage=usage, option_list=option.list)
 parsed <- parse_args(parser, positional_arguments=TRUE)
 opts <- parsed$options
 args <- parsed$args
+verbose <- opts$verbose
 
 yfile <- args[1]
 if (!file.exists(yfile)) {
@@ -97,11 +98,19 @@ if (!dir.exists(peak.dir)) {
 
 ## -----------------------------------------------------------------------------
 ## Check parameters for peak calling
-if (!is.character(config$bamfiles)) {
+if (verbose) message("Checking parameters in configuration file ...")
+bamfiles <- unlist(config$bamfiles)
+if (!is.character(bamfiles)) {
   err("Illegal input for bamfiles in config file")
 }
-if (!all(file.exists(config$bamfiles))) {
-  wut <- config$bamfiles[!file.exists(config$bamfiles)]
+if (is.null(names(bamfiles))) {
+  err("bamfiles require names")
+}
+if (any(duplicated(names(bamfiles)))) {
+  err("bamfiles require unique names")
+}
+if (!all(file.exists(bamfiles))) {
+  wut <- bamfiles[!file.exists(bamfiles)]
   err("Can't read bamfiles:", paste(wut, collapse="\n"))
 }
 
@@ -117,11 +126,14 @@ if (!is.numeric(config$resize_reads)) {
   config$resize_reads <- FALSE
   config <- c(config, list(resize_fix=NULL, resize_is=NULL))
 } else {
-  if (length(config$resize_reads)) {
+  if (length(config$resize_reads) != 1) {
     err("Illegal input for resize_reads")
   }
-  if (!(is.character(config$resize_fix) && is.character(config$resize_min))) {
-    err("Illegal values for resize_fix and resize_min")
+  if (!config$resize_fix %in% c('end', 'start', 'center', 'none')) {
+    err("Illegal value for resize_fix")
+  }
+  if (!config$resize_is %in% c('min', 'max', 'absolute')) {
+    err("Illegal value for resize_is")
   }
 }
 
@@ -140,23 +152,11 @@ if (is.numeric(config$trim_pos)) {
 }
 if (is.numeric(config$trim_neg)) {
   if (length(config$trim_neg) != 2 ||
-      any(config$tirm_neg <= 0 || config$tirm_neg >= 1)) {
+      any(config$trim_neg <= 0 || config$trim_neg >= 1)) {
     err("Illegal value for trim_neg")
   }
 } else {
   config <- c(config, list(trim_neg=NULL))
-}
-
-if (!is.null(config$annotation)) {
-  if (!file.exists(config$annotation)) {
-    err("Can not load annotation object")
-  }
-  annotation <- readRDS(config$annotation)
-  if (!GenomicCache::isValidAnnotatedGenome(annotation)) {
-    err("The annotation object does not pass the smoke tests")
-  }
-} else {
-  config <- c(config, list(annotation=NULL))
 }
 
 if (is.null(config$bam_filter)) {
@@ -171,6 +171,7 @@ if (is.null(config$bam_filter)) {
   }
 }
 
+if (verbose) message("Loading required packages ...")
 suppressPackageStartupMessages({
   for (req in reqs) {
     if (!require(req, character.only=TRUE)) {
@@ -196,15 +197,28 @@ if (is.character(config$bam_tags)) {
 
 ## =============================================================================
 ## Let it rip
-pkgs <- c('biosignals', 'GenomicRanges', 'Rsamtools')
+pkgs <- c('TagSeq', 'biosignals', 'GenomicRanges', 'Rsamtools')
 
-peaks <- foreach(chr=chrs, .packages=pkgs,
+# Resolve chromosomes
+bamfiles <- TagSeq:::checkBamFileList(bamfiles)
+si <- unifySeqinfo(bamfiles)
+if (is.null(config$chrs)) {
+  config$chrs <- si$seqnames
+}
+config$chrs <- unique(config$chrs)
+bad.chrs <- setdiff(config$chrs, si$seqnames)
+if (length(bad.chrs) > 0) {
+  message("Chromosomes not found in BAM files: ", paste(bad.chrs, collapse=","))
+}
+
+message("Starting peak calling")
+peaks <- foreach(chr=config$chrs, .packages=pkgs,
                  .options.multicore=list(preschedule=FALSE)) %loop% {
   if (verbose) {
     message("===", chr, "===")
   }
   these <-
-    identifyPeaksOnChromosome(config$bamfiles, stranded=config$stranded,
+    identifyPeaksOnChromosome(bamfiles, stranded=config$stranded,
                               bandwidth=config$bandwidth,
                               resize.reads=config$resize_reads,
                               resize.fix=config$resize_fix,
@@ -222,14 +236,28 @@ all.peaks <- all.peaks[order(all.peaks)]
 saveRDS(all.peaks, file.path(out.dir, "peaks.rds"))
 
 ## Did we get an annotated genome?
-if (!is.null(annotation)) {
-  if (GenomicCache::isValidAnnotatedGenome(annotation)) {
-    all.peaks <- annotateReads(all.peaks, annotation)
-    saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds")))
+do.annotation <- is.character(config$annotation)
+annotation <- NULL
+if (do.annotation) {
+  if (verbose) message("Loading annotation object from: ", config$annotation)
+  if (!file.exists(config$annotation)) {
+    message("Can not load annotation object")
+    do.annotation <- FALSE
   } else {
-    warning("The annotated genome that was passed in looked fishy, ",
-            "skipping annotation step", immediate.=TRUE)
+    annotation <- readRDS(config$annotation)
+    if (!GenomicCache::isValidAnnotatedGenome(annotation)) {
+      message("The annotation object does not pass the smoke tests")
+      do.annotation <- FALSE
+    }
   }
+}
+if (do.annotation) {
+  if (verbose) message("Annotated peaks")
+  all.peaks <- annotateReads(all.peaks, annotation)
+  saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds")))
+} else {
+  config$annotation <- NULL
+  config <- c(config, list(annotation=NULL))
 }
 
 config$daterun <- Sys.time()

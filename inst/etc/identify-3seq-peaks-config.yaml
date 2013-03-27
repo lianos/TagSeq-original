@@ -1,7 +1,7 @@
 genome: hg19
 bamfiles:
-  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam
-  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam
+  bcells.1: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam"
+  bcells.2: "/Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam"
 chrs:
   # (Leave out the chrs section if you want to run on all chromsomes)
   - chr21
@@ -32,4 +32,4 @@ bam_filter: |
     x
   }
 min_width: 24
-annotation: /Users/stavros/cBio/projects/TagSeq/inst/extdata/annotated.genome.hg19.rds
+annotation: "/Users/stavros/cBio/projects/TagSeq/inst/extdata/annotated.genome.hg19.rds"

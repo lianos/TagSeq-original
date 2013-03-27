@@ -98,7 +98,7 @@ summarizeTagClustersFromExperiments <-
 #' Note that this will probably do very weird things to spliced reads
 identifyPeaksOnChromosome <-
   function(bamfiles, chr, stranded=TRUE, bandwidth=35L,
-           resize.reads=NA, resize.fix=c('end', 'start', 'center'),
+           resize.reads=NA, resize.fix=c('end', 'start', 'center', 'none'),
            resize.is=c('min', 'max', 'absolute'),
            min.count.event.boundary=min(10, length(bamfiles)),
            trim.pos=c(.05, .98), trim.neg=c(.02, .95),
@@ -116,6 +116,9 @@ identifyPeaksOnChromosome <-
     resize.fix <- match.arg(resize.fix)
     resize.is <- match.arg(resize.is)
   } else {
+    resize.reads <- NA
+  }
+  if (resize.fix == 'none') {
     resize.reads <- NA
   }
   if (is.null(bam.param)) {
