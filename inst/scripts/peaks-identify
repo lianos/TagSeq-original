@@ -1,0 +1,236 @@
+#!/usr/bin/env Rscript
+
+details <- "
+  Identifies peaks across a set of BAM files.
+
+  The required CONFIGURATION.yaml stores all of the particular parameters
+  for the analysis and is required to be fully specified. This file will be
+  copied into the `outdir` for posterity (and your sanity) so you remember
+  what parameters were used for the analysis.
+
+  A `chr.peaks` directory will be created in `outdir` if it does not exist
+  already and the peaks found on each chromosome will be saved in there.
+
+  A final `all.peaks.rds` file will be saved in `outdir` that combines the
+  peaks from all chromosomes.
+
+  Packages required:
+    - optparse v1.0.1   [CRAN]
+    - yaml     v2.1.7   [CRAN]
+    - doParallel        [CRAN]
+    - biosignals        [https://github.com/lianos/biosignals]
+    - TagSeq            [https://github.com/lianos/TagSeq]
+    - GenomicCache      [https://github.com/lianos/GenomicCache]"
+
+reqs <- c("optparse", "GenomicCache", "TagSeq", "Rsamtools", "doParallel")
+
+################################################################################
+## Generic Rscript setup
+## -----------------------------------------------------------------------------
+## Insures that Rscript will exit during an uncaught error
+options(error=function(err) {
+  banner <- paste(rep("=", 80), collapse="")
+  cat("", banner, "An error happened you didn't account for.",
+      "Exiting ...", banner, "", sep="\n")
+  quit(save='no', status=1)
+})
+## Exit script with user supplied error
+err <- function(..., sep=" ") {
+  msg <- paste(unlist(list(...)), sep=sep)
+  cat("ERROR:", msg, "\n")
+  quit(save='no', status=1)
+}
+dir.exists <- function(path) {
+  path <- as.character(path)
+  sapply(file.info(path)$isdir, isTRUE)
+}
+
+missing.pkgs <- setdiff(reqs, dir(.libPaths()))
+if (length(missing.pkgs)) {
+  err("Required packages are missing:\n  ", paste(missing.pgks, collapse=","))
+}
+
+
+################################################################################
+## Particulars of the script starts here
+library(optparse)
+library(yaml)
+
+usage <- paste("%prog [OPTIONS] CONFIGURATION.yaml\n", details)
+option.list <-
+  list(make_option(c("-o", "--outdir"), default=".", type="character",
+                   help="The directory to output the results to"),
+       make_option(c("-c", "--chrs"), default=NULL, type="character",
+                   help="A subset of the chromosomes to run the analysis on"),
+       make_option(c("-t", "--threads"), default=4, type="integer",
+                   help="The number of cores to use for this process"),
+       make_option(c('-v', '--verbose'), default=FALSE, action="store_true",
+                   help="Make some noise")
+       )
+
+parser <- OptionParser(usage=usage, option_list=option.list)
+parsed <- parse_args(parser, positional_arguments=TRUE)
+opts <- parsed$options
+args <- parsed$args
+
+yfile <- args[1]
+if (!file.exists(yfile)) {
+  err("configuration yaml file not found")
+}
+config <- yaml.load_file(yfile)
+
+## -----------------------------------------------------------------------------
+## Check script inputs
+out.dir <- opts$outdir
+peak.dir <- file.path(out.dir, 'chr.peaks')
+
+if (!dir.exists(out.dir)) {
+  if (!dir.create(out.dir)) {
+    err("Could not create output directory: ", out.dir)
+  }
+}
+if (!dir.exists(peak.dir)) {
+  if (!dir.create(peak.dir)) {
+    err("Could not create output directory: ", peak.dir)
+  }
+}
+
+## -----------------------------------------------------------------------------
+## Check parameters for peak calling
+if (!is.character(config$bamfiles)) {
+  err("Illegal input for bamfiles in config file")
+}
+if (!all(file.exists(config$bamfiles))) {
+  wut <- config$bamfiles[!file.exists(config$bamfiles)]
+  err("Can't read bamfiles:", paste(wut, collapse="\n"))
+}
+
+if (!is.logical(config$stranded) && length(config$stranded) == 1L) {
+  err("Missing stranded config")
+}
+
+if (!is.numeric(config$bandwidth) || length(config$bandwidth) != 1) {
+  err("Illegal input for bandwidth")
+}
+
+if (!is.numeric(config$resize_reads)) {
+  config$resize_reads <- FALSE
+  config <- c(config, list(resize_fix=NULL, resize_is=NULL))
+} else {
+  if (length(config$resize_reads)) {
+    err("Illegal input for resize_reads")
+  }
+  if (!(is.character(config$resize_fix) && is.character(config$resize_min))) {
+    err("Illegal values for resize_fix and resize_min")
+  }
+}
+
+if (!is.numeric(config$min_count_event_boundary) ||
+    length(config$min_count_event_boundary) != 1) {
+  err("Illegal value for min_count_event_boundary")
+}
+
+if (is.numeric(config$trim_pos)) {
+  if (length(config$trim_pos) != 2 ||
+      any(config$trim_pos <= 0 || config$trim_pos >= 1)) {
+    err("Illegal value for trim_pos")
+  }
+} else {
+  config <- c(config, list(trim_pos=NULL))
+}
+if (is.numeric(config$trim_neg)) {
+  if (length(config$trim_neg) != 2 ||
+      any(config$tirm_neg <= 0 || config$tirm_neg >= 1)) {
+    err("Illegal value for trim_neg")
+  }
+} else {
+  config <- c(config, list(trim_neg=NULL))
+}
+
+if (!is.null(config$annotation)) {
+  if (!file.exists(config$annotation)) {
+    err("Can not load annotation object")
+  }
+  annotation <- readRDS(config$annotation)
+  if (!GenomicCache::isValidAnnotatedGenome(annotation)) {
+    err("The annotation object does not pass the smoke tests")
+  }
+} else {
+  config <- c(config, list(annotation=NULL))
+}
+
+if (is.null(config$bam_filter)) {
+  bam.filter <- NULL
+} else {
+  bam.filter <- tryCatch({
+    stopifnot(is.character(config$bam_filter))
+    eval(parse(text=config$bam_filter))
+  }, error=function(e) NULL)
+  if (is.null(bam.filter)) {
+    err("bam_filter has to be a string that parses to a valid R function")
+  }
+}
+
+suppressPackageStartupMessages({
+  for (req in reqs) {
+    if (!require(req, character.only=TRUE)) {
+      err("Required package missing: ", req)
+    }
+  }
+})
+
+if (opts$threads > 1) {
+  registerDoParallel(opts$threads)
+  '%loop%' <- getFunction('%dopar%')
+} else {
+  registerDoSeq()
+  '%loop%' <- getFunction('%do%')
+}
+
+bam.param <- ScanBamParam()
+if (is.character(config$bam_tags)) {
+  bamTag(bam.param) <- config$bam_tags
+} else {
+  config <- c(config, bam_tags=NULL)
+}
+
+## =============================================================================
+## Let it rip
+pkgs <- c('biosignals', 'GenomicRanges', 'Rsamtools')
+
+peaks <- foreach(chr=chrs, .packages=pkgs,
+                 .options.multicore=list(preschedule=FALSE)) %loop% {
+  if (verbose) {
+    message("===", chr, "===")
+  }
+  these <-
+    identifyPeaksOnChromosome(config$bamfiles, stranded=config$stranded,
+                              bandwidth=config$bandwidth,
+                              resize.reads=config$resize_reads,
+                              resize.fix=config$resize_fix,
+                              resize.is=config$resize_is,
+                              min.count.event.boundary=config$min_count_event_boundary,
+                              trim.pos=config$trim_pos, trim.neg=config$trim_neg,
+                              bam.param=bam.param,
+                              bam.flag=scanBamFlag(isUnmappedQuery=FALSE),
+                              bam.filter=bam.filter)
+  saveRDS(these, file.path(peak.dir, paste(chr, 'peaks.rds', sep='.')))
+}
+
+all.peaks <- do.call(c, unname(peaks[!sapply(peaks, is.null)]))
+all.peaks <- all.peaks[order(all.peaks)]
+saveRDS(all.peaks, file.path(out.dir, "peaks.rds"))
+
+## Did we get an annotated genome?
+if (!is.null(annotation)) {
+  if (GenomicCache::isValidAnnotatedGenome(annotation)) {
+    all.peaks <- annotateReads(all.peaks, annotation)
+    saveRDS(all.peaks, file.path(out.dir, "annotated-peaks.rds")))
+  } else {
+    warning("The annotated genome that was passed in looked fishy, ",
+            "skipping annotation step", immediate.=TRUE)
+  }
+}
+
+config$daterun <- Sys.time()
+cat(as.yaml(config), file=file.path(out.dir, "run-config.yaml"))

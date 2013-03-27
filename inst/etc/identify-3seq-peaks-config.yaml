@@ -1,0 +1,35 @@
+genome: hg19
+bamfiles:
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam
+chrs:
+  # (Leave out the chrs section if you want to run on all chromsomes)
+  - chr21
+  - chr22
+stranded: TRUE
+bandwidth: 35
+resize_reads: 32
+resize_fix: end
+resize_is: min
+min_count_event_boundary: 5
+trim_pos:
+  - 0.05
+  - 0.98
+trim_neg:
+  - 0.02
+  - 0.95
+bam_tags:
+  - X0
+  - X1
+  - XM
+  - XA
+# bam.filter needs to parse into an R function. It will take in a
+# GappedReads (Granges-like) object and must return the same type of
+# object containing only the ranges you want analyzed. for peak identification
+# I don't do any filtering
+bam_filter: |
+  function(x) {
+    x
+  }
+min_width: 24
+annotation: /Users/stavros/cBio/projects/TagSeq/inst/extdata/annotated.genome.hg19.rds

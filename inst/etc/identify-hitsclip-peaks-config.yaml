@@ -1,0 +1,13 @@
+genome: hg19
+bandwidth: 35
+min.count.event.boundary: 5
+min.width: 24
+trim.pos:
+  - 0.05
+  - 0.98
+trim.neg:
+  - 0.02
+  - 0.95
+bamfiles:
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam

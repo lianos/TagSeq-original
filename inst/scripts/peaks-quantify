@@ -1,0 +1,57 @@
+#!/usr/bin/env Rscript
+
+details <- "
+  Quantifies a previously identified set of peaks.
+
+  The required CONFIGURATION.yaml stores all of the particular parameters
+  for the analysis and is required to be fully specified. This file will be
+  copied into the `outdir` for posterity (and your sanity) so you remember
+  what parameters were used for the analysis.
+
+  Packages required:
+    - optparse v1.0.1   [CRAN]
+    - yaml     v2.1.7   [CRAN]
+    - TagSeq            [https://github.com/lianos/TagSeq]
+"
+
+## Use `optparse` to configure and parse command line arguments.
+suppressPackageStartupMessages({
+  if (!require(optparse)) {
+    err('The optparse library needed, please install via:\n',
+        'install.packages("optparse", repos="http://R-Forge.R-project.org")')
+  }
+})
+
+################################################################################
+## Generic Rscript setup
+## -----------------------------------------------------------------------------
+
+## Insures that Rscript will exit during an uncaught error
+options(error=function(err) {
+  banner <- paste(rep("=", 80), collapse="")
+  cat("", banner, "An error happened you didn't account for.",
+      "Exiting ...", banner, "", sep="\n")
+  quit(save='no', status=1)
+})
+
+## Exit script with user supplied error
+err <- function(..., sep=" ") {
+  msg <- paste(unlist(list(...)), sep=sep)
+  cat("ERROR:", msg, "\n")
+  quit(save='no', status=1)
+}
+
+dir.exists <- function(path) {
+  path <- as.character(path)
+  sapply(file.info(path)$isdir, isTRUE)
+}
+
+################################################################################
+## Particulars of the script start here
+usage <- paste("%prog [OPTIONS] CONFIGURATION.yaml", details, sep="\n")
+opt.list <-
+  list(make_option(c("-o", "--outdir"), default=".", type="character",
+                   help="The directory to output the results to"),
+       make_option(c("-c", "--chrs"), default=NULL, type="character",
+                   help="A subset of the chromosomes to run the analysis on")
+

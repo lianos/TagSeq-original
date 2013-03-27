@@ -1,0 +1,19 @@
+genome: hg19
+bamfiles:
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-1.bam
+  - /Users/stavros/cBio/papers/apa-1/data/bams/multimap/clean/bcells-2.bam
+chrs:
+  # Leave out the chrs section if you want to run on all chromsomes listed
+  # in the input peaks
+  - chr21
+  - chr22
+bam.tags:
+  - X0
+  - X1
+  - XM
+  - XA
+bam.filter: >
+  function(x) {
+    stopifnot("X0" %in% names(mcols(x)))
+    x[mcols(x)$X0 == 1]
+  }

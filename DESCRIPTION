@@ -1,4 +1,4 @@
-Package: TagSeq2
+Package: TagSeq
 Version: 0.0.1
 License: GPL-2
 Title: Analyze data generated from high throughput tag-sequencing protocols.

@@ -61,10 +61,7 @@ summarizeTagClustersFromExperiments <-
                                 trim.pos=trim.pos, trim.neg=trim.neg,
                                 bam.param=bam.param.peaks,
                                 bam.flag=bam.flag.peaks,
-                                bam.filter=bam.filter.peaks,
-                                resize.reads=resize.reads,
-                                resize.fix=resize.fix,
-                                resize.is=resize.is)
+                                bam.filter=bam.filter.peaks)
     saveRDS(these, file.path(pdir, paste(chr, 'peaks.rds', sep='.')))
   }
 
@@ -74,24 +71,11 @@ summarizeTagClustersFromExperiments <-
 
   ## Did we get an annotated genome?
   if (!is.null(annotation)) {
-    if (!inherits(annotation, "GenomicRanges")) {
-      ## Ensure that this thing looks like an annotated genome object
-      has.gaps <- length(gaps(annotation)) > 0
-      is.disjoint <- length(findOverlaps(annotation, ignoreSelf=TRUE)) == 0
-      if (has.gaps) {
-        warning("The annotated genome object has gaps -- does not look correct",
-                immediate.=TRUE)
-      }
-      if (!is.disjoint) {
-        warning("The annotated genome object has self overlaps, looks wrong",
-                immediate.=TRUE)
-      }
-      if (!has.gaps && is.disjoint) {
-        all.peaks <- annotateReads(all.peaks, annotation)
-      } else {
-        warning("The annotate genome that was passed in looked fishy, ",
-                "skipping annotation step", immediate.=TRUE)
-      }
+    if (GenomicCache::isValidAnnotatedGenome(annotation)) {
+      all.peaks <- annotateReads(all.peaks, annotation)
+    } else {
+      warning("The annotate genome that was passed in looked fishy, ",
+              "skipping annotation step", immediate.=TRUE)
     }
   }
 
@@ -131,8 +115,16 @@ identifyPeaksOnChromosome <-
     }
     resize.fix <- match.arg(resize.fix)
     resize.is <- match.arg(resize.is)
+  } else {
+    resize.reads <- NA
+  }
+  if (is.null(bam.param)) {
+    bam.param <- bwaSamseParams()
   }
   stopifnot(is(bam.param, 'ScanBamParam'))
+  if (is.null(bam.flag)) {
+    bam.flag <- scanBamFlag(isUnmappedQuery=FALSE)
+  }
   bamfiles <- checkBamFileList(bamfiles, clean.names=FALSE)
   si <- unifySeqinfo(bamfiles)
   chr.info <- subset(si, seqnames == chr)
