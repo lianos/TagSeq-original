@@ -31,6 +31,9 @@ export(internalPrimingSummary,
        identifyPeaksOnChromosome,
        quantifyPeakExpression,
 
+       clusterPeaks,
+       newSEfromRegions,
+
        # ApA specific,
        collectPolyAPositionStatistics,
        combinePrimingInfo,

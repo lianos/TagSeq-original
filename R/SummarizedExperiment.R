@@ -57,9 +57,12 @@ newSEfromRegions <- function(regions, original, original.assay.idx=1L) {
   dt <- data.table(region.id=mm[,1], as.matrix(ocnts), key='region.id')
   ncnts <- dt[, lapply(.SD, sum), by='region.id']
 
-  SummarizedExperiment(as.matrix(ncnts[, region.id := NULL]), rowData=regions,
-                       colData=colData(original), exptData=exptData(original))
+  se <- SummarizedExperiment(as.matrix(ncnts[, region.id := NULL]), rowData=regions,
+                             colData=colData(original), exptData=exptData(original))
+  names(assays(se)) <- 'counts'
+  se
 }
+
 
 annotateSummarizedExperiment <- function(x, annotations, nuclear=TRUE) {
   stopifnot(inherits(x, "SummarizedExperiment"))

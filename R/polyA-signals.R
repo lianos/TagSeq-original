@@ -21,6 +21,10 @@ kPolyA$dna.signal <- gsub("U", "T", kPolyA$signal)
 ##' the same event, there will be two rows generated for that signal with
 ##' the matching information.
 ##'
+##' NOTE: This function only looks WITHIN the events -- the combinePrimingInfo
+##'       function measures from the cleavage site to validated the pAS, but
+##'       it seems that we should be doing that here(!)
+##'
 ##' If you just want one pA signal per event, follow this call with
 ##' \code{summarizePolyAPositionStatistics}
 ##'

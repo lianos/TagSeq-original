@@ -55,11 +55,11 @@ trim_neg:
 # useful to use in conjunction with the bam_filter function. I use all mapped
 # reads to identify the shape and location of peaks, and uniquely mapping reads
 # to quantify their expression -- it seems to work well this way in practice.
-# bam_tags:
-#   - X0
-#   - X1
-#   - XM
-#   - XA
+bam_tags:
+  - X0
+  - X1
+  - XM
+  - XA
 
 # bam_filter needs to parse into an R function. It will take in a
 # GappedReads (Granges-like) object and must return the same type of
