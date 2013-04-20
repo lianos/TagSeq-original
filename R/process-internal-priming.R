@@ -38,9 +38,8 @@
 ##  chr1:45,244,272-45,244,514
 ##    5' end of event is internally primed?
 
-## TODO: These functions failed on chrM once -- something about ranges being
-## out of bounds -- check this out.
-## Wrappper for all internal priming things?
+## TODO: events +/- sliding window distance can overrun (or under run) the
+##       start and end of chromosomes -- fix!
 internalPrimingSummary <- function(events, bsg, ip.functions=NULL, chrs=NULL,
                                    .parallel=TRUE, ...) {
   if (is.null(chrs)) {

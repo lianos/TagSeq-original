@@ -1,6 +1,7 @@
 import(methods)
 import(BiocGenerics)
 import(GenomicRanges)
+import(Rsamtools)
 import(SeqTools)
 import(foreach)
 import(data.table)
