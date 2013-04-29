@@ -5,7 +5,7 @@ Title: Analyze data generated from high throughput tag-sequencing protocols.
 Description: Tools to analyze in-house tag sequencing protocols from Mayr and Tuschl.
 Depends: GenomicFeatures, GenomicCache
 Imports: methods, BiocGenerics, Biostrings, ShortRead, foreach, doParallel,
-  data.table (>= 1.8.8), SeqTools, biosignals
+  data.table (>= 1.8.8), SeqTools, biosignals, Rsamtools
 Suggests: testthat (>= 0.7)
 Author: Steve Lianoglou <slianoglou@gmail.com>
 Maintainer: Steve Lianoglou <slianoglou@gmail.com>

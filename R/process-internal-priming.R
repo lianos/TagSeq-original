@@ -1,43 +1,3 @@
-## TODO: Improve internal priming score
-##
-## Using hump-finding-axe, we flag internal priming events when
-## 8/10 in a sliding window are A's starting from peak of event to its
-## 3'end.
-##
-## Examine:
-##   1. Where do polya signal lie w.r.t to the peak of the event
-##      - the 3' end of the event?
-##      (use only events that !is.primed)
-##   2. Look at A-enrichment (avg. of slidigin window A count) in
-##      a. event
-##      b. peak of event to 3'
-##
-## Looks like internal priming, but saved by polyA rescue:
-##  * chr21:33,640,671-33,640,784
-##    The 3' end is a very rich-A tail
-##    The polyA signal (AGTAAA) is in a low-coverage area under the 3' tail
-##    And its antisense!
-##  * The peak immediately 5' (chr21:33,640,882-33,640,992) also looks like
-##    internal priming. Also very A rich region.
-##    Wide event (97bp) and low coverage.
-##
-## Older::
-## This looks like internal priming but has a max of 7/10 A's in a row
-##   chr1:93,730,436-93,730,504
-## Think about creating a longer range score -- maybe it incorporates the
-## avg # of A's compared to background for these longer events?
-## Engage the brain and do something smarter, dang it!
-##
-## It really seems that "long/wide" events are due to internal priming!
-## Look at antisenes reads here: chr1:182,351,914-182,352,666
-
-## Some (older) areas that are tricky:
-##  chr1:59,041,067-59,041,309
-##    looks like 5' tail of event is due to internal priming, but 3' end
-##    is real
-##  chr1:45,244,272-45,244,514
-##    5' end of event is internally primed?
-
 ## This function is called after internalPrimingSummary and
 ## collectPolyAPositionStatistics
 ##
@@ -139,6 +99,9 @@ flagEventsOnAnnotedGeneEnd <- function(events, annotated.genome,
 ## TODO: These functions failed on chrM once -- something about ranges being
 ## out of bounds -- check this out.
 ## Wrappper for all internal priming things?
+##
+## TODO: events +/- sliding window distance can overrun (or under run) the
+##       start and end of chromosomes -- fix!
 internalPrimingSummary <- function(events, bsg, ip.functions=NULL, chrs=NULL,
                                    .parallel=TRUE, ...) {
   if (is.null(chrs)) {
@@ -701,3 +664,42 @@ if (FALSE) {
   points(smoothing.gauss + 50, col='blue')
 }
 
+## TODO: Improve internal priming score
+##
+## Using hump-finding-axe, we flag internal priming events when
+## 8/10 in a sliding window are A's starting from peak of event to its
+## 3'end.
+##
+## Examine:
+##   1. Where do polya signal lie w.r.t to the peak of the event
+##      - the 3' end of the event?
+##      (use only events that !is.primed)
+##   2. Look at A-enrichment (avg. of slidigin window A count) in
+##      a. event
+##      b. peak of event to 3'
+##
+## Looks like internal priming, but saved by polyA rescue:
+##  * chr21:33,640,671-33,640,784
+##    The 3' end is a very rich-A tail
+##    The polyA signal (AGTAAA) is in a low-coverage area under the 3' tail
+##    And its antisense!
+##  * The peak immediately 5' (chr21:33,640,882-33,640,992) also looks like
+##    internal priming. Also very A rich region.
+##    Wide event (97bp) and low coverage.
+##
+## Older::
+## This looks like internal priming but has a max of 7/10 A's in a row
+##   chr1:93,730,436-93,730,504
+## Think about creating a longer range score -- maybe it incorporates the
+## avg # of A's compared to background for these longer events?
+## Engage the brain and do something smarter, dang it!
+##
+## It really seems that "long/wide" events are due to internal priming!
+## Look at antisenes reads here: chr1:182,351,914-182,352,666
+
+## Some (older) areas that are tricky:
+##  chr1:59,041,067-59,041,309
+##    looks like 5' tail of event is due to internal priming, but 3' end
+##    is real
+##  chr1:45,244,272-45,244,514
+##    5' end of event is internally primed?
