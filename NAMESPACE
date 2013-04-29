@@ -38,5 +38,6 @@ export(internalPrimingSummary,
        collectPolyAPositionStatistics,
        combinePrimingInfo,
        identifyValidPaSignals,
-       kPolyA
+       kPolyA,
+       flagEventsOnAnnotedGeneEnd
        )

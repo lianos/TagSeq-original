@@ -139,14 +139,6 @@ if (length(input) == 0) {
   err("No BAM files were found")
 }
 
-if (verbose) {
-  cat("Loading genome annotation object ...\n")
-}
-anno <- readRDS(genome)
-if (!inherits(anno, 'GenomicRanges')) {
-  err("Genome Annotation object looks wrong, GenomicRanges subclass required")
-}
-
 ###############################################################################
 ## Everything looks kosher, let's do the deed.
 ## ----------------------------------------------------------------------------
@@ -159,6 +151,17 @@ suppressPackageStartupMessages({
   suppressWarnings(use.ggplot <- require(ggplot2))
   dl('gc', 'seqstore', 'tagseq')
 })
+
+
+if (verbose) {
+  cat("Loading genome annotation object ...\n")
+}
+anno <- readRDS(genome)
+if (!inherits(anno, 'GenomicRanges')) {
+  err("The annotation object loaded from the file below is not a subt is not a subtype of GenomicRanges",
+      genome, sep="\n")
+}
+
 
 if (verbose) {
   cat("Loading", if (unique.only) 'unique' else 'multimap',

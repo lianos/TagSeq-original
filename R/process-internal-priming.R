@@ -38,6 +38,104 @@
 ##  chr1:45,244,272-45,244,514
 ##    5' end of event is internally primed?
 
+## This function is called after internalPrimingSummary and
+## collectPolyAPositionStatistics
+##
+## Taken from ApA-atlas-ipriming.R
+combinePrimingInfo <- function(evts, ip.stats, pa.stats,
+                           event.a.rich=0.65, max.a.rich=0.8,
+                           rescue.polya=kPolyA$dna.signal[1:6],
+                           pa.max.from.end=45L, pa.min.from.end=10L,
+                           anno.rescue=NULL, rescue.from.end=40,
+                           as.mask=FALSE) {
+  ##    The default tresholds to flag events for priming is:
+  ##      event.a.rich (iArich) >= 0.65
+  ##      a hit from externally.primed.window (ewindow.primed)
+  stopifnot(inherits(evts, 'GenomicRanges'))
+  stopifnot(inherits(ip.stats, 'DataFrame') && nrow(ip.stats) == length(evts))
+  if (is.character(rescue.polya) || isTRUE(rescue.polya)) {
+    stopifnot(inherits(pa.stats, 'data.frame'))
+  }
+
+  meta <- values(evts)
+
+  rename <- c(externally.primed.window='external',
+              externally.primed.abs='eA6',
+              internally.primed.primed='internal')
+
+  for (name in names(rename)) {
+    change.idx <- which(names(ip.stats) == name)
+    if (length(change.idx) == 1L) {
+      names(ip.stats)[change.idx] <- rename[name]
+    }
+  }
+
+  if (nrow(ip.stats) != length(evts)) {
+    stop("events do not match ip stats")
+  }
+
+  ip.stats$external[is.na(ip.stats$external)] <- 0L
+  ip.stats$internal[is.na(ip.stats$internal)] <- 0L
+
+  window.ip.flag <- ip.stats$external > 0
+  internal.ip.flag <- ip.stats$internal > max.a.rich
+
+  ## Add pA signal stats
+  pas <- identifyValidPaSignals(evts, pa.stats,
+                                pa.min.from.end=pa.min.from.end,
+                                pa.max.from.end=pa.max.from.end)
+
+  ip.stats$n.signal <- rep(0L, nrow(ip.stats))
+  ip.stats$n.signal[pas$query] <- pas$N
+
+  ip.stats$signal <- rep(NA_character_, nrow(ip.stats))
+  ip.stats$signal[pas$query] <- as.character(pas$first)
+
+  priming.status <- rep('none', length(evts))
+
+  a.rich <- ip.stats$internal >= event.a.rich
+  priming.status[a.rich] <- 'a.rich'
+
+  external.p <- ip.stats$external > 0
+  priming.status[external.p] <- 'external'
+
+  ## Finally, if any event has an internal/internal A score >= max.a.rich
+  ## nuke it w/o regards for poly(A) rescue
+  a.rich.max <- ip.stats$internal >= max.a.rich
+  priming.status[a.rich.max] <- 'a.rich.max'
+
+  ip.stats$ip.status <- priming.status
+
+  axe <- ip.stats$ip.status != 'none' & ip.stats$n.signal == 0
+  axe <- axe | a.rich.max
+
+  if (!is.null(anno.rescue)) {
+    on.end <- flagEventsOnAnnotedGeneEnd(evts, anno.rescue, rescue.from.end)
+    ip.stats$annotated.end <- on.end > 0
+    axe <- axe & on.end == 0
+  }
+
+  ip.stats$ip.axe <- axe
+  ip.stats
+}
+
+flagEventsOnAnnotedGeneEnd <- function(events, annotated.genome,
+                                       target.width=40) {
+  anno <- as(annotated.genome, 'GRanges')
+  anno <- anno[values(anno)$exon.anno == 'utr3']
+  anno <- resize(anno, width=1, fix='end') + floor(target.width / 2)
+
+  anno.dt <- as(anno, 'data.table')
+  key(anno.dt) <- c('seqnames', 'entrez.id', 'strand', 'start')
+  ends <- anno.dt[, {
+    idx <- if (strand[1] == '+') which.max(end) else which.min(start)
+    list(start=start[idx], end=end[idx], symbol=symbol[1])
+  }, by=list(seqnames, entrez.id, strand)]
+
+  countOverlaps(events, as(ends, "GRanges")) > 0
+}
+
+
 ## TODO: These functions failed on chrM once -- something about ranges being
 ## out of bounds -- check this out.
 ## Wrappper for all internal priming things?
@@ -172,7 +270,8 @@ function(x, dna, a.window.count=5, abs.a.count=6, ip.window=6,
   }
   stopifnot(inherits(dna, "DNAString"))
 
-  if (!is.null(quantile.start) && !is.null(quantile.end)) {
+  if (!missing(quantile.start) && !is.null(quantile.start) &&
+      !missing(quantile.end) && !is.null(quantile.end)) {
     qbounds <- .reconstructQuantileBounds(x, quantile.start, quantile.end,
                                           ...)
   } else {
@@ -184,12 +283,13 @@ function(x, dna, a.window.count=5, abs.a.count=6, ip.window=6,
     is.fwd <- as.logical(strand(x) == '+')
     qends <- end(qbounds)
     qends[is.fwd] <- pmin(end(x[is.fwd]) - min.upstream + 1L, qends[is.fwd])
-    end(qbounds[is.fwd]) <- pmax(start(qbounds[is.fwd]), qends[is.fwd])
+    end(qbounds[is.fwd]) <- pmax(start(qbounds[is.fwd]), qends[is.fwd], 1L)
 
     is.rev <- !is.fwd
     qstarts <- start(qbounds)
     qstarts[is.rev] <- pmax(start(x[is.rev]) + min.upstream - 1L, qstarts[is.rev])
-    start(qbounds[is.rev]) <- pmin(end(qbounds[is.rev]), qstarts[is.rev])
+    start(qbounds[is.rev]) <- pmin(end(qbounds[is.rev]), qstarts[is.rev],
+                                   Biostrings::nchar(dna))
   }
 
   if (flag.by == 'position') {
@@ -220,6 +320,11 @@ function(x, dna, a.window.count=5, abs.a.count=6, ip.window=6,
         ## end(sbounds[!meta$is.distal]) <- end(sbounds[!meta$is.distal]) +
         ##   (ip.internal.downstream - ip.distal.downstream)
       }
+
+      ## New: attempt to run around sliding windows that run over the ends of
+      ##      the chromosome
+      start(sbounds) <- pmax(start(sbounds), 1L)
+      end(sbounds) <- pmin(end(sbounds), Biostrings::nchar(dna))
 
       views <- Views(dna, sbounds)
       lfreq <- letterFrequencyInSlidingView(views, ip.window, primed.by)

@@ -134,9 +134,10 @@ identifyValidPaSignals <- function(x, pa.stats, pa.min.from.end=10L,
   if (count.only) {
     ans <- countOverlaps(x.gr, pa.gr)
   } else {
-    mm <- as.matrix(findOverlaps(x.gr, pa.gr))
-    mm <- transform(data.table(mm, key="queryHits"),
-                    signal=values(pa.gr)$signal[subjectHits])
+    o <- findOverlaps(x.gr, pa.gr)
+    mm <- data.table(queryHits=queryHits(o), subjectHits=subjectHits(o),
+                     key="queryHits")
+    mm[, signal := values(pa.gr)$signal[subjectHits]]
 
     mm$signal.rank <- match(mm$signal, pa.rank)
     default <- NA_character_

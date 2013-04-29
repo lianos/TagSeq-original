@@ -20,7 +20,7 @@ clusterPeaks <- function(x, max.distance=50L,
   mcols(xevts) <- NULL
   mask <- reduce(xevts[order(xevts)])
 
-  mm <- as.matrix(findOverlaps(xevts, mask))
+  mm <- IRanges::as.matrix(findOverlaps(xevts, mask))
   if (any(duplicated(mm[,1]))) {
     stop("There shouldn't be any duplicate queryHits")
   }
@@ -52,7 +52,7 @@ newSEfromRegions <- function(regions, original, original.assay.idx=1L) {
   stopifnot(inherits(original, 'SummarizedExperiment'))
 
   ocnts <- assay(original, original.assay.idx)
-  mm <- as.matrix(findOverlaps(regions, rowData(original)))
+  mm <- IRanges::as.matrix(findOverlaps(regions, rowData(original)))
 
   dt <- data.table(region.id=mm[,1], as.matrix(ocnts), key='region.id')
   ncnts <- dt[, lapply(.SD, sum), by='region.id']
