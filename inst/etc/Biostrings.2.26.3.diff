@@ -14,7 +14,7 @@ Index: R/letterFrequency.R
 @@ -375,20 +375,45 @@
          standardGeneric("letterFrequencyInSlidingView")
  )
- 
+
 -### Ensure 'view.width' is not NA
 -setMethod("letterFrequencyInSlidingView", "XString",
 +setMethod("letterFrequencyInSlidingView", "XStringSet",
@@ -34,7 +34,7 @@ Index: R/letterFrequency.R
          ans
      }
  )
- 
+
 +### Ensure 'view.width' is not NA
 +setMethod("letterFrequencyInSlidingView", "XString",
 +    function(x, view.width, letters, OR="|", as.prob=FALSE)
@@ -53,7 +53,7 @@ Index: R/letterFrequency.R
 +        view.width <- .normargWidth(view.width, "view.width")
 +        if (!isTRUEorFALSE(as.prob))
 +            stop("'as.prob' must be TRUE or FALSE")
-+        y <- XStringViewsToSet(x, use.names=FALSE, verbose=FALSE)
++        y <- as(x, "XStringSet")
 +        letterFrequencyInSlidingView(y, view.width, letters, OR, as.prob)
 +    }
 +)
@@ -68,7 +68,7 @@ Index: src/Biostrings.h
 @@ -303,6 +303,15 @@
  	SEXP colnames
  );
- 
+
 +SEXP XStringSet_letterFrequencyInSlidingView(
 +	SEXP x,
 +	SEXP view_width,
@@ -88,20 +88,20 @@ Index: src/letter_frequency.c
 @@ -140,6 +140,37 @@
  	return rtn;
  }
- 
+
 +/* Helper function to "drive" letterFrequencinyInSlidingView over each of the
 + * XStrings in its XStringSet.
-+ * 
++ *
 + * This functions takes an XString and sets up the correct SEXP to store
 + * the letter frequency calculation for "virtual" views that tile its length.
 + */
-+static SEXP letter_freqs_in_sliding_view(const cachedCharSeq *x, 
++static SEXP letter_freqs_in_sliding_view(const cachedCharSeq *x,
 +		int view_width, int ans_width, SEXP colnames)
 +{
 +	int i, nrow, first, *ans_row;
 +	const char *c;
 +	SEXP ans, dim_names;
-+	
++
 +	nrow = x->length - view_width + 1;
 +	if (nrow < 1) {
 +		return R_NilValue;
@@ -124,7 +124,7 @@ Index: src/letter_frequency.c
     ncol = X->length is equivalent to calling update_letter_freqs() */
  static void update_letter_freqs2(int *mat, const cachedCharSeq *X, SEXP codes,
 @@ -428,9 +459,9 @@
- 
+
  /* Author: HJ
   * Tests, for the specified codes, the virtual XStringSet formed by "sliding
 - * a window of length k" along a whole XString.
@@ -146,7 +146,7 @@ Index: src/letter_frequency.c
 @@ -485,6 +517,46 @@
  	return ans;
  }
- 
+
 +SEXP XStringSet_letterFrequencyInSlidingView(SEXP x, SEXP view_width,
 +	SEXP single_codes, SEXP colmap, SEXP colnames)
 +{
@@ -156,9 +156,9 @@ Index: src/letter_frequency.c
 +	cachedXStringSet cached_x = _cache_XStringSet(x);
 +	cachedCharSeq x_elt;
 +	SEXP ans, ans_elt, dim_names;
-+	
++
 +	PROTECT(ans = NEW_LIST(x_length));
-+	
++
 +	ans_width = get_ans_width(single_codes, 0);
 +	// byte2offset[code] is now set for each code in 'single_codes'.
 +	// If 'colmap' is non-NULL, we edit these settings accordingly.
@@ -174,7 +174,7 @@ Index: src/letter_frequency.c
 +			byte2offset[INTEGER(single_codes)[i]] = ans_width - 1;
 +		}
 +	}
-+	
++
 +	for (i = 0; i < x_length; i++) {
 +		x_elt = _get_cachedXStringSet_elt(&cached_x, i);
 +		PROTECT(ans_elt = letter_freqs_in_sliding_view(&x_elt, vwidth,
@@ -182,7 +182,7 @@ Index: src/letter_frequency.c
 +		SET_VECTOR_ELT(ans, i, ans_elt);
 +		UNPROTECT(1);
 +	}
-+	
++
 +	UNPROTECT(1);
 +	return ans;
 +}
