@@ -60,7 +60,7 @@ dir.exists <- function(path) {
 
 missing.pkgs <- setdiff(reqs, dir(.libPaths()))
 if (length(missing.pkgs)) {
-  err("Required packages are missing:\n  ", paste(missing.pgks, collapse=","))
+  err("Required packages are missing:\n  ", paste(missing.pkgs, collapse=","))
 }
 
 
@@ -100,7 +100,7 @@ if (length(args) == 0) {
 }
 yfile <- args[1]
 if (!file.exists(yfile)) {
-  err("configuration yaml file not found")
+  err("configuration yaml file not found:\n  ", yfile)
 }
 config <- yaml.load_file(yfile)
 
@@ -223,9 +223,15 @@ suppressPackageStartupMessages({
 })
 
 if (opts$threads > 1) {
+  if (verbose) {
+    message("Running in parallel on ", opts$threads, "threads")
+  }
   registerDoParallel(opts$threads)
   '%loop%' <- getFunction('%dopar%')
 } else {
+  if (verbose) {
+    message("Running single threaded")
+  }
   registerDoSEQ()
   '%loop%' <- getFunction('%do%')
 }
